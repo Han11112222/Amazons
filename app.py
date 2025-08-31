@@ -5,17 +5,50 @@ from typing import List, Tuple, Dict, Optional
 
 import streamlit as st
 
-# ===== 기본 세팅 =====
-st.set_page_config(page_title="Amazons (1P vs CPU)", layout="wide")
+# ================= 기본 세팅 =================
+st.set_page_config(page_title="Cool Choi Amazons", layout="wide")
 
 SIZE = 10
 EMPTY, HUM, CPU, BLOCK = 0, 1, 2, 3
 DIRS = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]
 
-EMO_HUM = "🔵"
-EMO_CPU = "🟡"
-EMO_BLK = "⬛"
-EMO_EMP = "·"
+# 이모지
+EMO_HUM = "🔵"   # 플레이어
+EMO_CPU = "🟡"   # 컴퓨터
+EMO_BLK = "⬛"   # 블록
+EMO_EMP = "·"   # 빈칸
+EMO_MOVE = "🟩"  # 이동 가능
+EMO_SHOT = "🟥"  # 사격 가능
+
+# 보드 칸 크기(정사각형)
+CELL_PX = 44
+
+# 보드 전용 CSS: 모든 칸을 **정사각형 버튼**으로 고정
+st.markdown(
+    f"""
+    <style>
+    /* 보드 그리드 여백 최소화 */
+    .board-grid div[data-testid="column"] {{
+        padding: 2px !important;
+    }}
+    /* 보드 칸 버튼을 정사각형으로 통일 */
+    .board-grid .stButton > button {{
+        width: {CELL_PX}px !important;
+        height: {CELL_PX}px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: {CELL_PX}px !important;
+        border-radius: 10px !important;
+        font-size: {int(CELL_PX*0.45)}px !important;
+        display: inline-flex; align-items: center; justify-content: center;
+    }}
+    .board-grid .stButton > button:disabled {{
+        opacity: 1.0 !important;     /* 비활성도 동일 외형 유지 */
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 @dataclass
 class Move:
@@ -25,7 +58,7 @@ class Move:
 
 Board = List[List[int]]
 
-# ===== 유틸 =====
+# ================= 보드/규칙 유틸 =================
 def in_bounds(r:int,c:int)->bool:
     return 0 <= r < SIZE and 0 <= c < SIZE
 
@@ -62,7 +95,7 @@ def apply_move(b:Board, mv:Move, side:int)->Board:
 def has_any_move(b:Board, side:int)->bool:
     return any(legal_dests_from(b,r,c) for r,c in piece_positions(b, side))
 
-# ===== 평가/AI (간결 버전: 난이도에 따라 깊이/분기 제한) =====
+# ================= 평가/AI(간결) =================
 def mobility(b:Board, side:int)->int:
     return sum(len(legal_dests_from(b,r,c)) for r,c in piece_positions(b, side))
 
@@ -83,16 +116,12 @@ def center_score(b:Board, side:int)->int:
     return tot
 
 def evaluate(b:Board)->int:
-    # +면 CPU 유리, -면 사람 유리
-    return (10*(mobility(b,CPU)-mobility(b,HUM))
-            + 2*(liberties(b,CPU)-liberties(b,HUM))
-            + (center_score(b,CPU)-center_score(b,HUM)))
+    return 10*(mobility(b,CPU)-mobility(b,HUM)) + 2*(liberties(b,CPU)-liberties(b,HUM)) + (center_score(b,CPU)-center_score(b,HUM))
 
 def gen_moves_limited(b:Board, side:int, k_dest:int, k_shot:int, cap:int)->List[Move]:
     out=[]
     for r,c in piece_positions(b, side):
         dests=legal_dests_from(b,r,c)
-        # 이동만 반영하여 휴리스틱 스코어
         scored=[]
         for tr,tc in dests:
             tmp = clone(b); tmp[r][c]=EMPTY; tmp[tr][tc]=side
@@ -159,7 +188,7 @@ def ai_move(b:Board, difficulty:int)->Optional[Move]:
         if v>val_best: val_best=v; best=mv
     return best
 
-# ===== 초기 보드 =====
+# ================= 초기 보드 =================
 def initial_board()->Board:
     b = [[EMPTY for _ in range(SIZE)] for _ in range(SIZE)]
     # 사람(백) d1,g1,a4,j4  => (9,3),(9,6),(6,0),(6,9)
@@ -168,7 +197,7 @@ def initial_board()->Board:
     b[3][0]=CPU; b[3][9]=CPU; b[0][3]=CPU; b[0][6]=CPU
     return b
 
-# ===== 상태 =====
+# ================= 상태 =================
 def reset_game():
     st.session_state.board = initial_board()
     st.session_state.turn = HUM
@@ -178,68 +207,64 @@ def reset_game():
     st.session_state.legal = set()
     st.session_state.difficulty = st.session_state.get("difficulty", 5)
     # 하이라이트 상태
-    st.session_state.last_human_move = None  # Move or None
+    st.session_state.last_human_move = None
     st.session_state.last_cpu_move = None
-    st.session_state.last_shot_pos = None     # (r,c) or None
-    st.session_state.highlight_to = None      # 현재 턴에서 방금 이동한 곳
+    st.session_state.last_shot_pos = None
+    st.session_state.highlight_to = None
 
 if "board" not in st.session_state:
     reset_game()
 
-# ===== 상단 UI =====
-hdr_left, hdr_right = st.columns([1,1])
-with hdr_left:
-    st.title("Amazons (1P vs CPU)")
-    st.caption("말을 퀸처럼 이동 → 도착한 자리에서 또 퀸처럼 화살(블록)을 발사해 빈칸을 막기. 상대가 더 이상 이동 못 하면 승리.")
-with hdr_right:
+# ================= 상단 UI =================
+left, right = st.columns([1,1])
+with left:
+    st.title("Cool Choi Amazons")
+    st.caption("말을 퀸처럼 이동 → 도착칸에서 또 퀸처럼 화살(블록)을 발사해 빈칸을 막기. 상대가 더 이상 이동 못 하면 승리.")
+with right:
     diff = st.slider("난이도 (1 쉬움 ··· 10 어려움)", 1, 10, st.session_state.get("difficulty",5))
     st.session_state.difficulty = diff
     c1,c2 = st.columns(2)
     if c1.button("새 게임", use_container_width=True):
-        reset_game()
-        st.rerun()
+        reset_game(); st.rerun()
     if c2.button("되돌리기(1수)", use_container_width=True):
         hist: List[Board] = st.session_state.get("hist", [])
-        if hist:
-            st.session_state.board = hist.pop()
+        if hist: st.session_state.board = hist.pop()
         st.rerun()
 st.session_state.setdefault("hist", [])
 
 board: Board = st.session_state.board
 
-# ===== 렌더링 보조(표시) =====
+# ================= 렌더/입력 =================
 def cell_label(r:int,c:int)->str:
-    """기본 말 + 하이라이트(선택◉ / 방금 이동✓ / 최근 블록✳)"""
+    """기본 말 + 강한 하이라이트(🟩 이동 / 🟥 사격) + 보조(◉ 선택 / ✓ 방금 이동 / ✳ 최근 블록)"""
+    label = EMO_EMP
     cell = board[r][c]
     if cell==HUM: label = EMO_HUM
     elif cell==CPU: label = EMO_CPU
     elif cell==BLOCK: label = EMO_BLK
-    else: label = EMO_EMP
 
-    # 선택 표시(내가 선택한 말)
-    if st.session_state.turn==HUM and st.session_state.sel_from == (r,c) and st.session_state.phase in ("move","shoot"):
+    # 이동/사격 가능 칸을 더 강하게
+    if st.session_state.turn==HUM:
+        if st.session_state.phase=="move" and (r,c) in st.session_state.legal and cell==EMPTY:
+            label = EMO_MOVE
+        elif st.session_state.phase=="shoot" and (r,c) in st.session_state.legal and cell==EMPTY:
+            label = EMO_SHOT
+
+    # 선택/최근 이동/블록 보조 표시
+    if st.session_state.turn==HUM and st.session_state.sel_from==(r,c) and st.session_state.phase in ("move","shoot"):
         label += "◉"
-
-    # 이번 턴 내가 방금 옮겨 놓은 자리(사격 전 단계)
     if st.session_state.highlight_to == (r,c):
         label += "✓"
-
-    # 최근 양측 이동 도착 칸
     hm = st.session_state.last_human_move
     cm = st.session_state.last_cpu_move
-    if hm and hm.to == (r,c): label += "✓"
-    if cm and cm.to == (r,c): label += "✓"
-
-    # 최근 블록
-    if st.session_state.last_shot_pos == (r,c) and board[r][c]==BLOCK:
+    if hm and hm.to==(r,c): label += "✓"
+    if cm and cm.to==(r,c): label += "✓"
+    if st.session_state.last_shot_pos == (r,c) and cell==BLOCK:
         label += "✳"
-
     return label
 
-# ===== 클릭 처리 =====
 def on_click(r:int,c:int):
-    turn = st.session_state.turn
-    if turn != HUM: return
+    if st.session_state.turn!=HUM: return
     phase = st.session_state.phase
 
     if phase=="select":
@@ -252,25 +277,20 @@ def on_click(r:int,c:int):
     elif phase=="move":
         if (r,c) in st.session_state.legal:
             fr = st.session_state.sel_from
-            nb = clone(board)
-            nb[fr[0]][fr[1]] = EMPTY
-            nb[r][c] = HUM
+            nb = clone(board); nb[fr[0]][fr[1]] = EMPTY; nb[r][c] = HUM
             st.session_state.board = nb
             st.session_state.sel_to = (r,c)
-            st.session_state.highlight_to = (r,c)   # 방금 옮긴 자리 표시
+            st.session_state.highlight_to = (r,c)
             st.session_state.legal = set(legal_shots_from(nb,r,c))
             st.session_state.phase = "shoot"
             st.rerun()
 
     elif phase=="shoot":
         if (r,c) in st.session_state.legal:
-            # 확정
             st.session_state.board[r][c] = BLOCK
             st.session_state.last_shot_pos = (r,c)
-            # 최근 사람 수 기록
             hm = Move(st.session_state.sel_from, st.session_state.sel_to, (r,c))
             st.session_state.last_human_move = hm
-            # 초기화
             st.session_state.hist.append(clone(board))
             st.session_state.turn = CPU
             st.session_state.phase = "select"
@@ -280,27 +300,27 @@ def on_click(r:int,c:int):
             st.session_state.highlight_to = None
             st.rerun()
 
-# ===== 보드 렌더(모든 칸을 동일한 버튼으로) =====
 st.subheader("보드")
-st.caption(f"{EMO_HUM}=플레이어  {EMO_CPU}=컴퓨터  {EMO_BLK}=블록  (◉ 선택, ✓ 방금 이동, ✳ 최근 블록)")
+st.caption(f"{EMO_HUM}=플레이어  {EMO_CPU}=컴퓨터  {EMO_BLK}=블록  " +
+           f"({EMO_MOVE} 이동 가능, {EMO_SHOT} 사격 가능 · ◉ 선택 · ✓ 방금 이동 · ✳ 최근 블록)")
 
+# 보드를 'board-grid' 클래스로 감싸서 CSS 범위를 제한
+st.markdown('<div class="board-grid">', unsafe_allow_html=True)
 for r in range(SIZE):
     cols = st.columns(SIZE)
     for c in range(SIZE):
         label = cell_label(r,c)
-        key = f"cell_{r}_{c}"
         clickable = False
         if st.session_state.turn==HUM:
             if st.session_state.phase=="select" and board[r][c]==HUM:
                 clickable=True
             elif st.session_state.phase in ("move","shoot") and (r,c) in st.session_state.legal:
                 clickable=True
-
-        pressed = cols[c].button(label, key=key, disabled=not clickable)
-        if pressed and clickable:
+        if cols[c].button(label, key=f"cell_{r}_{c}", disabled=not clickable):
             on_click(r,c)
+st.markdown("</div>", unsafe_allow_html=True)
 
-# ===== 엔드 체크 & AI =====
+# ================= 엔드체크 & AI =================
 def announce(msg:str, ok=True):
     color = "#16a34a" if ok else "#dc2626"
     st.markdown(
@@ -320,10 +340,9 @@ else:
             if mv is None:
                 announce("플레이어 승리! (컴퓨터가 움직일 곳이 없음)")
             else:
-                st.session_state.hist.append(clone(board))
                 st.session_state.board = apply_move(board, mv, CPU)
-                st.session_state.last_cpu_move = mv           # 컴퓨터 이동 표시
-                st.session_state.last_shot_pos = mv.shot      # 최근 블록 표시
+                st.session_state.last_cpu_move = mv
+                st.session_state.last_shot_pos = mv.shot
                 st.session_state.turn = HUM
                 st.session_state.phase = "select"
                 st.session_state.sel_from = None
