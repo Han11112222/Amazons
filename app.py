@@ -27,11 +27,9 @@ CELL_PX = 44
 st.markdown(
     f"""
     <style>
-    /* 보드 그리드 여백 최소화 */
     .board-grid div[data-testid="column"] {{
         padding: 2px !important;
     }}
-    /* 보드 칸 버튼을 정사각형으로 통일 */
     .board-grid .stButton > button {{
         width: {CELL_PX}px !important;
         height: {CELL_PX}px !important;
@@ -43,7 +41,7 @@ st.markdown(
         display: inline-flex; align-items: center; justify-content: center;
     }}
     .board-grid .stButton > button:disabled {{
-        opacity: 1.0 !important;     /* 비활성도 동일 외형 유지 */
+        opacity: 1.0 !important;
     }}
     </style>
     """,
@@ -206,14 +204,28 @@ def reset_game():
     st.session_state.sel_to = None
     st.session_state.legal = set()
     st.session_state.difficulty = st.session_state.get("difficulty", 5)
-    # 하이라이트 상태
+    # 하이라이트/엔드 상태
     st.session_state.last_human_move = None
     st.session_state.last_cpu_move = None
     st.session_state.last_shot_pos = None
     st.session_state.highlight_to = None
+    st.session_state.game_over = False
+    st.session_state.winner = None
+    st.session_state.show_dialog = False
 
 if "board" not in st.session_state:
     reset_game()
+
+# ========== 팝업(모달) ==========
+@st.dialog("경기 종료")
+def winner_dialog(who: str):
+    st.markdown(f"### **{who} 승리!** 🎉")
+    st.write("새 게임을 시작하거나 창을 닫을 수 있어요.")
+    colA, colB = st.columns(2)
+    def close_dialog(): st.session_state.show_dialog = False
+    def new_game(): reset_game()
+    if colA.button("닫기", use_container_width=True): close_dialog()
+    if colB.button("새 게임", use_container_width=True): new_game(); st.rerun()
 
 # ================= 상단 UI =================
 left, right = st.columns([1,1])
@@ -243,14 +255,12 @@ def cell_label(r:int,c:int)->str:
     elif cell==CPU: label = EMO_CPU
     elif cell==BLOCK: label = EMO_BLK
 
-    # 이동/사격 가능 칸을 더 강하게
-    if st.session_state.turn==HUM:
+    if not st.session_state.game_over and st.session_state.turn==HUM:
         if st.session_state.phase=="move" and (r,c) in st.session_state.legal and cell==EMPTY:
             label = EMO_MOVE
         elif st.session_state.phase=="shoot" and (r,c) in st.session_state.legal and cell==EMPTY:
             label = EMO_SHOT
 
-    # 선택/최근 이동/블록 보조 표시
     if st.session_state.turn==HUM and st.session_state.sel_from==(r,c) and st.session_state.phase in ("move","shoot"):
         label += "◉"
     if st.session_state.highlight_to == (r,c):
@@ -264,6 +274,7 @@ def cell_label(r:int,c:int)->str:
     return label
 
 def on_click(r:int,c:int):
+    if st.session_state.game_over: return
     if st.session_state.turn!=HUM: return
     phase = st.session_state.phase
 
@@ -300,18 +311,21 @@ def on_click(r:int,c:int):
             st.session_state.highlight_to = None
             st.rerun()
 
+# 상단 캡션(승리 라벨 표시)
+who = st.session_state.winner
+caption_hum = f"{EMO_HUM}=플레이어" + (" (승리)" if who=="플레이어" else "")
+caption_cpu = f"{EMO_CPU}=컴퓨터" + (" (승리)" if who=="컴퓨터" else "")
 st.subheader("보드")
-st.caption(f"{EMO_HUM}=플레이어  {EMO_CPU}=컴퓨터  {EMO_BLK}=블록  " +
-           f"({EMO_MOVE} 이동 가능, {EMO_SHOT} 사격 가능 · ◉ 선택 · ✓ 방금 이동 · ✳ 최근 블록)")
+st.caption(f"{caption_hum}  {caption_cpu}  {EMO_BLK}=블록  ({EMO_MOVE} 이동 가능, {EMO_SHOT} 사격 가능 · ◉ 선택 · ✓ 방금 이동 · ✳ 최근 블록)")
 
-# 보드를 'board-grid' 클래스로 감싸서 CSS 범위를 제한
+# 보드 렌더 (정사각형 버튼)
 st.markdown('<div class="board-grid">', unsafe_allow_html=True)
 for r in range(SIZE):
     cols = st.columns(SIZE)
     for c in range(SIZE):
         label = cell_label(r,c)
         clickable = False
-        if st.session_state.turn==HUM:
+        if not st.session_state.game_over and st.session_state.turn==HUM:
             if st.session_state.phase=="select" and board[r][c]==HUM:
                 clickable=True
             elif st.session_state.phase in ("move","shoot") and (r,c) in st.session_state.legal:
@@ -321,24 +335,38 @@ for r in range(SIZE):
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ================= 엔드체크 & AI =================
-def announce(msg:str, ok=True):
+def end_game(winner_label: str, human_win: bool):
+    st.session_state.game_over = True
+    st.session_state.winner = winner_label
+    st.session_state.show_dialog = True
+    if human_win:
+        st.balloons()
+
+def announce_and_set(who: str, ok=True):
     color = "#16a34a" if ok else "#dc2626"
     st.markdown(
-        f"<div style='padding:8px;border-radius:8px;background:{'#ecfdf5' if ok else '#fef2f2'};color:{color}'>{msg}</div>",
+        f"<div style='padding:8px;border-radius:8px;background:{'#ecfdf5' if ok else '#fef2f2'};color:{color}'><b>{who} 승리!</b></div>",
         unsafe_allow_html=True
     )
 
-if st.session_state.turn==HUM:
-    if not has_any_move(board,HUM):
-        announce("컴퓨터 승리! (플레이어가 움직일 곳이 없음)", ok=False)
-else:
+# 내 차례에서 더 이상 둘 곳이 없으면 컴퓨터 승리
+if not st.session_state.game_over:
+    if st.session_state.turn==HUM:
+        if not has_any_move(board,HUM):
+            announce_and_set("컴퓨터", ok=False)
+            end_game("컴퓨터", human_win=False)
+
+# 컴퓨터 차례 처리
+if not st.session_state.game_over and st.session_state.turn==CPU:
     if not has_any_move(board,CPU):
-        announce("플레이어 승리! (컴퓨터가 움직일 곳이 없음)")
+        announce_and_set("플레이어", ok=True)
+        end_game("플레이어", human_win=True)
     else:
         with st.spinner("컴퓨터 생각중..."):
             mv = ai_move(board, st.session_state.difficulty)
             if mv is None:
-                announce("플레이어 승리! (컴퓨터가 움직일 곳이 없음)")
+                announce_and_set("플레이어", ok=True)
+                end_game("플레이어", human_win=True)
             else:
                 st.session_state.board = apply_move(board, mv, CPU)
                 st.session_state.last_cpu_move = mv
@@ -349,3 +377,7 @@ else:
                 st.session_state.sel_to = None
                 st.session_state.legal = set()
         st.rerun()
+
+# 팝업 열기
+if st.session_state.show_dialog and st.session_state.winner:
+    winner_dialog(st.session_state.winner)
