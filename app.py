@@ -1,20 +1,21 @@
 from __future__ import annotations
-import time, random
+import random
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional
 
 import streamlit as st
 
-# =============== 기본 설정 ===============
+# ===== 기본 세팅 =====
 st.set_page_config(page_title="Amazons (1P vs CPU)", layout="wide")
-EMO_HUM = "🔵"   # 플레이어 말
-EMO_CPU = "🟡"   # 컴퓨터 말
-EMO_BLK = "⬛"   # 바위(막힘)
-EMO_EMPTY = "·"
 
-SIZE = 10  # 10x10 보드
+SIZE = 10
 EMPTY, HUM, CPU, BLOCK = 0, 1, 2, 3
 DIRS = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]
+
+EMO_HUM = "🔵"
+EMO_CPU = "🟡"
+EMO_BLK = "⬛"
+EMO_EMP = "·"
 
 @dataclass
 class Move:
@@ -24,316 +25,292 @@ class Move:
 
 Board = List[List[int]]
 
-# =============== 보드/규칙 유틸 ===============
+# ===== 유틸 =====
 def in_bounds(r:int,c:int)->bool:
     return 0 <= r < SIZE and 0 <= c < SIZE
 
-def clone(board:Board)->Board:
-    return [row[:] for row in board]
+def clone(b:Board)->Board:
+    return [row[:] for row in b]
 
-def iter_ray(board:Board, r:int,c:int, dr:int,dc:int):
+def iter_ray(b:Board, r:int,c:int, dr:int,dc:int):
     nr, nc = r+dr, c+dc
-    while in_bounds(nr,nc) and board[nr][nc]==EMPTY:
+    while in_bounds(nr,nc) and b[nr][nc]==EMPTY:
         yield (nr,nc)
         nr += dr; nc += dc
 
-def piece_positions(board:Board, side:int)->List[Tuple[int,int]]:
+def piece_positions(b:Board, side:int)->List[Tuple[int,int]]:
     token = HUM if side==HUM else CPU
-    res=[]
-    for r in range(SIZE):
-        for c in range(SIZE):
-            if board[r][c]==token:
-                res.append((r,c))
-    return res
+    return [(r,c) for r in range(SIZE) for c in range(SIZE) if b[r][c]==token]
 
-def legal_dests_from(board:Board, r:int,c:int)->List[Tuple[int,int]]:
-    dests=[]
+def legal_dests_from(b:Board, r:int,c:int)->List[Tuple[int,int]]:
+    out=[]
     for dr,dc in DIRS:
-        for (nr,nc) in iter_ray(board,r,c,dr,dc):
-            dests.append((nr,nc))
-    return dests
+        out.extend(iter_ray(b,r,c,dr,dc))
+    return out
 
-def legal_shots_from(board:Board, r:int,c:int)->List[Tuple[int,int]]:
-    shots=[]
-    for dr,dc in DIRS:
-        for (nr,nc) in iter_ray(board,r,c,dr,dc):
-            shots.append((nr,nc))
-    return shots
+def legal_shots_from(b:Board, r:int,c:int)->List[Tuple[int,int]]:
+    return legal_dests_from(b,r,c)
 
-def apply_move(board:Board, mv:Move, side:int)->Board:
-    nb = clone(board)
-    fr, to, shot = mv.fr, mv.to, mv.shot
-    r1,c1 = fr; r2,c2 = to; rs,cs = shot
+def apply_move(b:Board, mv:Move, side:int)->Board:
+    nb = clone(b)
+    (r1,c1),(r2,c2),(rs,cs) = mv.fr, mv.to, mv.shot
     nb[r1][c1] = EMPTY
     nb[r2][c2] = side
     nb[rs][cs] = BLOCK
     return nb
 
-def has_any_move(board:Board, side:int)->bool:
-    for r,c in piece_positions(board, side):
-        if legal_dests_from(board,r,c):
-            return True
-    return False
+def has_any_move(b:Board, side:int)->bool:
+    return any(legal_dests_from(b,r,c) for r,c in piece_positions(b, side))
 
-# =============== 평가/AI ===============
-def mobility(board:Board, side:int)->int:
-    # 말이 이동 가능한 목적지 수(화살 제외)
-    m=0
-    for r,c in piece_positions(board, side):
-        m += len(legal_dests_from(board,r,c))
-    return m
+# ===== 평가/AI (간결 버전: 난이도에 따라 깊이/분기 제한) =====
+def mobility(b:Board, side:int)->int:
+    return sum(len(legal_dests_from(b,r,c)) for r,c in piece_positions(b, side))
 
-def liberties(board:Board, side:int)->int:
-    # 말 주변 8방의 빈칸 수
+def liberties(b:Board, side:int)->int:
     s=0
-    for r,c in piece_positions(board, side):
+    for r,c in piece_positions(b, side):
         for dr,dc in DIRS:
             nr,nc=r+dr,c+dc
-            if in_bounds(nr,nc) and board[nr][nc]==EMPTY:
+            if in_bounds(nr,nc) and b[nr][nc]==EMPTY:
                 s+=1
     return s
 
-def center_score(board:Board, side:int)->int:
-    # 중앙 근접도(가까울수록 좋음)
+def center_score(b:Board, side:int)->int:
     cx, cy = (SIZE-1)/2, (SIZE-1)/2
-    total=0
-    for r,c in piece_positions(board, side):
-        total -= int(abs(r-cx)+abs(c-cy))
-    return total
+    tot=0
+    for r,c in piece_positions(b, side):
+        tot -= int(abs(r-cx)+abs(c-cy))
+    return tot
 
-def evaluate(board:Board)->int:
-    # + 점수면 CPU 유리, - 면 플레이어 유리
-    cpu_m = mobility(board, CPU)
-    hum_m = mobility(board, HUM)
-    cpu_l = liberties(board, CPU)
-    hum_l = liberties(board, HUM)
-    cpu_c = center_score(board, CPU)
-    hum_c = center_score(board, HUM)
-    return 10*(cpu_m-hum_m) + 2*(cpu_l-hum_l) + (cpu_c-hum_c)
+def evaluate(b:Board)->int:
+    # +면 CPU 유리, -면 사람 유리
+    return (10*(mobility(b,CPU)-mobility(b,HUM))
+            + 2*(liberties(b,CPU)-liberties(b,HUM))
+            + (center_score(b,CPU)-center_score(b,HUM)))
 
-def generate_moves_limited(board:Board, side:int, k_dest:int, k_shot:int, cap_total:int)->List[Move]:
-    """분기 제한형 생성: 목적지 상위 k, 샷 상위 k, 전체 cap_total"""
-    moves: List[Move] = []
-    for r,c in piece_positions(board, side):
-        dests = legal_dests_from(board, r, c)
-        scored_d=[]
-        for (tr,tc) in dests:
-            # 이동만 적용하여 임시 평가(빠른 휴리스틱)
-            tmp = clone(board)
-            tmp[r][c]=EMPTY; tmp[tr][tc]=side
-            # 상대 이동성 감소/자신 이동성 증가를 선호
-            sc = (mobility(tmp, side) - mobility(tmp, HUM if side==CPU else CPU))
-            # 중앙 선호
-            sc += - (abs(tr-(SIZE-1)/2)+abs(tc-(SIZE-1)/2))/5
-            scored_d.append(((tr,tc), sc))
-        scored_d.sort(key=lambda x:x[1], reverse=True)
-        for (tr,tc), _ in scored_d[:k_dest]:
-            tmp = clone(board)
-            tmp[r][c]=EMPTY; tmp[tr][tc]=side
-            shots = legal_shots_from(tmp, tr, tc)
-            scored_s=[]
-            for (sr,sc) in shots:
+def gen_moves_limited(b:Board, side:int, k_dest:int, k_shot:int, cap:int)->List[Move]:
+    out=[]
+    for r,c in piece_positions(b, side):
+        dests=legal_dests_from(b,r,c)
+        # 이동만 반영하여 휴리스틱 스코어
+        scored=[]
+        for tr,tc in dests:
+            tmp = clone(b); tmp[r][c]=EMPTY; tmp[tr][tc]=side
+            sc = mobility(tmp, side) - mobility(tmp, HUM if side==CPU else CPU)
+            scored.append(((tr,tc), sc))
+        scored.sort(key=lambda x:x[1], reverse=True)
+        for (tr,tc),_ in scored[:k_dest]:
+            tmp = clone(b); tmp[r][c]=EMPTY; tmp[tr][tc]=side
+            shots = legal_shots_from(tmp,tr,tc)
+            s2=[]
+            for sr,sc in shots:
                 tmp2 = clone(tmp); tmp2[sr][sc]=BLOCK
-                s = (mobility(tmp2, side) - mobility(tmp2, HUM if side==CPU else CPU))
-                scored_s.append(((sr,sc), s))
-            scored_s.sort(key=lambda x:x[1], reverse=True)
-            for (sr,sc), _ in scored_s[:k_shot]:
-                moves.append(Move((r,c),(tr,tc),(sr,sc)))
-                if len(moves)>=cap_total: return moves
-    return moves
+                s2.append(((sr,sc), mobility(tmp2, side)-mobility(tmp2, HUM if side==CPU else CPU)))
+            s2.sort(key=lambda x:x[1], reverse=True)
+            for (sr,sc),_ in s2[:k_shot]:
+                out.append(Move((r,c),(tr,tc),(sr,sc)))
+                if len(out)>=cap: return out
+    return out
 
-def search(board:Board, depth:int, alpha:int, beta:int, side:int,
-           params:Dict[str,int])->int:
-    # 종료
-    if depth==0 or not has_any_move(board, side):
-        # 움직일 수 없는 쪽이 지금 차례면 패배 → 상대에게 유리(부호)
-        if not has_any_move(board, side):
-            return 10_000 if side==HUM else -10_000  # side 가 HUM 차례인데 HUM이 못움직이면 CPU 유리(큰 +)
-        return evaluate(board)
+def search(b:Board, depth:int, a:int, bb:int, side:int, P:Dict[str,int])->int:
+    if depth==0 or not has_any_move(b, side):
+        if not has_any_move(b, side):
+            return 10_000 if side==HUM else -10_000
+        return evaluate(b)
 
-    k_dest = params["k_dest_d{}".format(depth)]
-    k_shot = params["k_shot_d{}".format(depth)]
-    cap = params["cap_d{}".format(depth)]
-
-    moves = generate_moves_limited(board, side, k_dest, k_shot, cap)
-    if not moves:
-        return 10_000 if side==HUM else -10_000
+    k_d = P[f"k_dest_d{depth}"]; k_s = P[f"k_shot_d{depth}"]; cap = P[f"cap_d{depth}"]
+    moves = gen_moves_limited(b, side, k_d, k_s, cap)
+    if not moves: return 10_000 if side==HUM else -10_000
 
     if side==CPU:
         best=-1_000_000
         for mv in moves:
-            nb = apply_move(board, mv, CPU)
-            val = search(nb, depth-1, alpha, beta, HUM, params)
-            if val>best: best=val
-            alpha = max(alpha, val)
-            if beta<=alpha: break
+            val = search(apply_move(b,mv,CPU), depth-1, a, bb, HUM, P)
+            best = max(best,val); a=max(a,val)
+            if bb<=a: break
         return best
     else:
         best=1_000_000
         for mv in moves:
-            nb = apply_move(board, mv, HUM)
-            val = search(nb, depth-1, alpha, beta, CPU, params)
-            if val<best: best=val
-            beta = min(beta, val)
-            if beta<=alpha: break
+            val = search(apply_move(b,mv,HUM), depth-1, a, bb, CPU, P)
+            best = min(best,val); bb=min(bb,val)
+            if bb<=a: break
         return best
 
-def ai_move(board:Board, difficulty:int)->Optional[Move]:
-    # 난이도에 따른 탐색 파라미터(깊이/분기)
-    # d1~3: 1수만, d4~6: 2수, d7~10: 3수(제한)
+def ai_move(b:Board, difficulty:int)->Optional[Move]:
     if difficulty<=3:
         depth=1
-        params = dict(k_dest_d1=6+difficulty*4, k_shot_d1=4+difficulty*2, cap_d1=40+difficulty*20)
+        P=dict(k_dest_d1=6+difficulty*3, k_shot_d1=5+difficulty*2, cap_d1=40+difficulty*20)
     elif difficulty<=6:
         depth=2
-        params = dict(
-            k_dest_d2=6+2*(difficulty-3), k_shot_d2=4+1*(difficulty-3), cap_d2=40+10*(difficulty-3),
-            k_dest_d1=10, k_shot_d1=8, cap_d1=80
-        )
+        P=dict(k_dest_d2=8+(difficulty-3)*2, k_shot_d2=6+(difficulty-3), cap_d2=40+10*(difficulty-3),
+               k_dest_d1=10, k_shot_d1=8, cap_d1=80)
     else:
-        depth=3
-        scale = difficulty-6
-        params = dict(
-            k_dest_d3=4+scale,   k_shot_d3=3+scale//2, cap_d3=18+4*scale,
-            k_dest_d2=8+scale,   k_shot_d2=6+scale//2, cap_d2=40+8*scale,
-            k_dest_d1=10,        k_shot_d1=8,         cap_d1=80
-        )
+        depth=3; s=difficulty-6
+        P=dict(k_dest_d3=5+s, k_shot_d3=4+s//2, cap_d3=18+4*s,
+               k_dest_d2=9+s, k_shot_d2=7+s//2, cap_d2=42+8*s,
+               k_dest_d1=10, k_shot_d1=8, cap_d1=80)
 
-    # 루트 분기 생성
-    root_moves = generate_moves_limited(board, CPU,
-                                        params.get("k_dest_d{}".format(depth), 8),
-                                        params.get("k_shot_d{}".format(depth), 6),
-                                        params.get("cap_d{}".format(depth), 50))
-    if not root_moves:
-        return None
+    root = gen_moves_limited(b, CPU, P[f"k_dest_d{depth}"], P[f"k_shot_d{depth}"], P[f"cap_d{depth}"])
+    if not root: return None
+    best=None; val_best=-1_000_000
+    for mv in root:
+        v = search(apply_move(b,mv,CPU), depth-1, -1_000_000, 1_000_000, HUM, P)
+        if v>val_best: val_best=v; best=mv
+    return best
 
-    best_mv=None; best_val=-1_000_000
-    for mv in root_moves:
-        nb = apply_move(board, mv, CPU)
-        val = search(nb, depth-1, -1_000_000, 1_000_000, HUM, params)
-        if val>best_val:
-            best_val=val; best_mv=mv
-    return best_mv
-
-# =============== 초기 배치(표준 10×10) ===============
+# ===== 초기 보드 =====
 def initial_board()->Board:
     b = [[EMPTY for _ in range(SIZE)] for _ in range(SIZE)]
-    # White(플레이어) d1,g1,a4,j4  -> 0-index: (9,3),(9,6),(6,0),(6,9)
+    # 사람(백) d1,g1,a4,j4  => (9,3),(9,6),(6,0),(6,9)
     b[9][3]=HUM; b[9][6]=HUM; b[6][0]=HUM; b[6][9]=HUM
-    # Black(컴퓨터) a7,j7,d10,g10 -> (3,0),(3,9),(0,3),(0,6)
+    # 컴퓨터(흑) a7,j7,d10,g10 => (3,0),(3,9),(0,3),(0,6)
     b[3][0]=CPU; b[3][9]=CPU; b[0][3]=CPU; b[0][6]=CPU
     return b
 
-# =============== 세션 상태 ===============
+# ===== 상태 =====
 def reset_game():
     st.session_state.board = initial_board()
-    st.session_state.turn = HUM   # 플레이어 선공
+    st.session_state.turn = HUM
     st.session_state.phase = "select"  # select -> move -> shoot
     st.session_state.sel_from = None
     st.session_state.sel_to = None
     st.session_state.legal = set()
     st.session_state.difficulty = st.session_state.get("difficulty", 5)
-    st.session_state.message = ""
+    # 하이라이트 상태
+    st.session_state.last_human_move = None  # Move or None
+    st.session_state.last_cpu_move = None
+    st.session_state.last_shot_pos = None     # (r,c) or None
+    st.session_state.highlight_to = None      # 현재 턴에서 방금 이동한 곳
 
 if "board" not in st.session_state:
     reset_game()
 
-# =============== 상단 컨트롤 ===============
-left, right = st.columns([1,1])
-with left:
-    st.title("쿨초이 Amazons (1P vs CPU)")
-    st.caption("규칙: 말 한 개를 퀸처럼 이동 → 그 자리에서 바위를 퀸처럼 발사해 빈칸을 막기. 상대가 더 이상 이동 못하면 승리.")
-with right:
+# ===== 상단 UI =====
+hdr_left, hdr_right = st.columns([1,1])
+with hdr_left:
+    st.title("Amazons (1P vs CPU)")
+    st.caption("말을 퀸처럼 이동 → 도착한 자리에서 또 퀸처럼 화살(블록)을 발사해 빈칸을 막기. 상대가 더 이상 이동 못 하면 승리.")
+with hdr_right:
     diff = st.slider("난이도 (1 쉬움 ··· 10 어려움)", 1, 10, st.session_state.get("difficulty",5))
     st.session_state.difficulty = diff
-    c1,c2,c3 = st.columns(3)
-    if c1.button("새 게임", use_container_width=True): reset_game()
+    c1,c2 = st.columns(2)
+    if c1.button("새 게임", use_container_width=True):
+        reset_game()
+        st.rerun()
     if c2.button("되돌리기(1수)", use_container_width=True):
         hist: List[Board] = st.session_state.get("hist", [])
-        if hist: st.session_state.board = hist.pop()
-    st.session_state.setdefault("hist", [])
+        if hist:
+            st.session_state.board = hist.pop()
+        st.rerun()
+st.session_state.setdefault("hist", [])
 
 board: Board = st.session_state.board
 
-# =============== 보드 렌더/입력 ===============
-def render_board():
-    st.markdown("#### 보드")
-    # 전설(legend)
-    st.caption(f"{EMO_HUM}=플레이어 {EMO_CPU}=컴퓨터 {EMO_BLK}=바위")
-    for r in range(SIZE):
-        cols = st.columns(SIZE)
-        for c in range(SIZE):
-            cell = board[r][c]
-            label = EMO_EMPTY
-            if cell==HUM: label = EMO_HUM
-            elif cell==CPU: label = EMO_CPU
-            elif cell==BLOCK: label = EMO_BLK
+# ===== 렌더링 보조(표시) =====
+def cell_label(r:int,c:int)->str:
+    """기본 말 + 하이라이트(선택◉ / 방금 이동✓ / 최근 블록✳)"""
+    cell = board[r][c]
+    if cell==HUM: label = EMO_HUM
+    elif cell==CPU: label = EMO_CPU
+    elif cell==BLOCK: label = EMO_BLK
+    else: label = EMO_EMP
 
-            key = f"b_{r}_{c}"
-            clickable=False
-            # 클릭 가능 조건
-            if st.session_state.turn==HUM:
-                if st.session_state.phase=="select" and cell==HUM:
-                    clickable=True
-                elif st.session_state.phase=="move" and (r,c) in st.session_state.legal:
-                    clickable=True
-                elif st.session_state.phase=="shoot" and (r,c) in st.session_state.legal:
-                    clickable=True
+    # 선택 표시(내가 선택한 말)
+    if st.session_state.turn==HUM and st.session_state.sel_from == (r,c) and st.session_state.phase in ("move","shoot"):
+        label += "◉"
 
-            if clickable:
-                if cols[c].button(label, key=key):
-                    handle_click(r,c)
-            else:
-                cols[c].markdown(f"<div style='text-align:center;font-size:22px'>{label}</div>", unsafe_allow_html=True)
+    # 이번 턴 내가 방금 옮겨 놓은 자리(사격 전 단계)
+    if st.session_state.highlight_to == (r,c):
+        label += "✓"
 
-def handle_click(r:int,c:int):
+    # 최근 양측 이동 도착 칸
+    hm = st.session_state.last_human_move
+    cm = st.session_state.last_cpu_move
+    if hm and hm.to == (r,c): label += "✓"
+    if cm and cm.to == (r,c): label += "✓"
+
+    # 최근 블록
+    if st.session_state.last_shot_pos == (r,c) and board[r][c]==BLOCK:
+        label += "✳"
+
+    return label
+
+# ===== 클릭 처리 =====
+def on_click(r:int,c:int):
     turn = st.session_state.turn
+    if turn != HUM: return
     phase = st.session_state.phase
-    if turn!=HUM: return
 
     if phase=="select":
         if board[r][c]==HUM:
             st.session_state.sel_from = (r,c)
-            st.session_state.phase = "move"
             st.session_state.legal = set(legal_dests_from(board,r,c))
+            st.session_state.phase = "move"
             st.rerun()
 
     elif phase=="move":
         if (r,c) in st.session_state.legal:
-            # 이동 반영(임시)
             fr = st.session_state.sel_from
             nb = clone(board)
             nb[fr[0]][fr[1]] = EMPTY
             nb[r][c] = HUM
-            st.session_state.preview = nb
-            st.session_state.sel_to = (r,c)
-            st.session_state.phase = "shoot"
-            st.session_state.legal = set(legal_shots_from(nb,r,c))
             st.session_state.board = nb
+            st.session_state.sel_to = (r,c)
+            st.session_state.highlight_to = (r,c)   # 방금 옮긴 자리 표시
+            st.session_state.legal = set(legal_shots_from(nb,r,c))
+            st.session_state.phase = "shoot"
             st.rerun()
 
     elif phase=="shoot":
         if (r,c) in st.session_state.legal:
-            # 최종 확정
+            # 확정
             st.session_state.board[r][c] = BLOCK
-            st.session_state.hist.append(clone(board))  # undo용
-            st.session_state.phase = "select"
+            st.session_state.last_shot_pos = (r,c)
+            # 최근 사람 수 기록
+            hm = Move(st.session_state.sel_from, st.session_state.sel_to, (r,c))
+            st.session_state.last_human_move = hm
+            # 초기화
+            st.session_state.hist.append(clone(board))
             st.session_state.turn = CPU
+            st.session_state.phase = "select"
             st.session_state.sel_from = None
             st.session_state.sel_to = None
             st.session_state.legal = set()
+            st.session_state.highlight_to = None
             st.rerun()
 
-render_board()
+# ===== 보드 렌더(모든 칸을 동일한 버튼으로) =====
+st.subheader("보드")
+st.caption(f"{EMO_HUM}=플레이어  {EMO_CPU}=컴퓨터  {EMO_BLK}=블록  (◉ 선택, ✓ 방금 이동, ✳ 최근 블록)")
 
-# =============== 차례 처리 ===============
-def announce(msg:str, success=True):
-    color = "#16a34a" if success else "#dc2626"
-    st.markdown(f"<div style='padding:8px;border-radius:8px;background:{'#ecfdf5' if success else '#fef2f2'};color:{color}'>{msg}</div>", unsafe_allow_html=True)
+for r in range(SIZE):
+    cols = st.columns(SIZE)
+    for c in range(SIZE):
+        label = cell_label(r,c)
+        key = f"cell_{r}_{c}"
+        clickable = False
+        if st.session_state.turn==HUM:
+            if st.session_state.phase=="select" and board[r][c]==HUM:
+                clickable=True
+            elif st.session_state.phase in ("move","shoot") and (r,c) in st.session_state.legal:
+                clickable=True
+
+        pressed = cols[c].button(label, key=key, disabled=not clickable)
+        if pressed and clickable:
+            on_click(r,c)
+
+# ===== 엔드 체크 & AI =====
+def announce(msg:str, ok=True):
+    color = "#16a34a" if ok else "#dc2626"
+    st.markdown(
+        f"<div style='padding:8px;border-radius:8px;background:{'#ecfdf5' if ok else '#fef2f2'};color:{color}'>{msg}</div>",
+        unsafe_allow_html=True
+    )
 
 if st.session_state.turn==HUM:
     if not has_any_move(board,HUM):
-        announce("컴퓨터 승리! (플레이어가 움직일 곳이 없음)", success=False)
+        announce("컴퓨터 승리! (플레이어가 움직일 곳이 없음)", ok=False)
 else:
     if not has_any_move(board,CPU):
         announce("플레이어 승리! (컴퓨터가 움직일 곳이 없음)")
@@ -345,6 +322,8 @@ else:
             else:
                 st.session_state.hist.append(clone(board))
                 st.session_state.board = apply_move(board, mv, CPU)
+                st.session_state.last_cpu_move = mv           # 컴퓨터 이동 표시
+                st.session_state.last_shot_pos = mv.shot      # 최근 블록 표시
                 st.session_state.turn = HUM
                 st.session_state.phase = "select"
                 st.session_state.sel_from = None
