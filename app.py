@@ -241,7 +241,7 @@ if "board" not in st.session_state:
 # =============== 상단 컨트롤 ===============
 left, right = st.columns([1,1])
 with left:
-    st.title("목우회 Amazons (1P vs CPU)")
+    st.title("쿨초이 Amazons (1P vs CPU)")
     st.caption("규칙: 말 한 개를 퀸처럼 이동 → 그 자리에서 바위를 퀸처럼 발사해 빈칸을 막기. 상대가 더 이상 이동 못하면 승리.")
 with right:
     diff = st.slider("난이도 (1 쉬움 ··· 10 어려움)", 1, 10, st.session_state.get("difficulty",5))
