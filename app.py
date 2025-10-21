@@ -17,8 +17,8 @@ EMO_HUM = "🔵"   # 플레이어(선턴)
 EMO_CPU = "🟢"   # 컴퓨터(후턴, 라임 느낌)
 EMO_BLK = "⬛"   # 블록
 EMO_EMP = "·"   # 빈칸
-EMO_MOVE = "🟩"  # 이동 가능 (녹색 사각형)
-EMO_SHOT = "🟥"  # 사격 가능 (빨간 사각형)
+EMO_MOVE = "🟩"  # 이동 가능
+EMO_SHOT = "🟥"  # 사격 가능
 
 @dataclass
 class Move:
@@ -86,7 +86,6 @@ def center_score(b:Board, side:int)->int:
     return tot
 
 def evaluate(b:Board)->int:
-    # 가벼운 평가식: 가동성, 인접 자유도, 중앙성
     return 10*(mobility(b,CPU)-mobility(b,HUM)) + 2*(liberties(b,CPU)-liberties(b,HUM)) + (center_score(b,CPU)-center_score(b,HUM))
 
 def gen_moves_limited(b:Board, side:int, k_dest:int, k_shot:int, cap:int)->List[Move]:
@@ -140,48 +139,25 @@ def search(b:Board, depth:int, a:int, bb:int, side:int, P:Dict[str,int])->int:
         return best
 
 def ai_params_by_difficulty(d:int)->Tuple[int,Dict[str,int]]:
-    """
-    난이도 1~15 매핑
-      - 1~3 : 깊이1(빠름) 브랜치 넓게
-      - 4~6 : 깊이2
-      - 7~10: 깊이3
-      - 11~15: 깊이4 (브랜치 강하게 제한)
-    """
     if d<=3:
         depth=1
-        P=dict(
-            k_dest_d1=6+d*3,
-            k_shot_d1=5+d*2,
-            cap_d1=40+d*20
-        )
+        P=dict(k_dest_d1=6+d*3, k_shot_d1=5+d*2, cap_d1=40+d*20)
     elif d<=6:
-        depth=2
-        x=d-3
-        P=dict(
-            k_dest_d2=8+2*x,  k_shot_d2=6+x,   cap_d2=40+10*x,
-            k_dest_d1=10,     k_shot_d1=8,    cap_d1=80
-        )
+        depth=2; x=d-3
+        P=dict(k_dest_d2=8+2*x, k_shot_d2=6+x, cap_d2=40+10*x,
+               k_dest_d1=10, k_shot_d1=8, cap_d1=80)
     elif d<=10:
-        depth=3
-        s=d-6
-        P=dict(
-            k_dest_d3=5+s,    k_shot_d3=4+s//2,  cap_d3=18+4*s,
-            k_dest_d2=9+s,    k_shot_d2=7+s//2,  cap_d2=42+8*s,
-            k_dest_d1=10,     k_shot_d1=8,       cap_d1=80
-        )
+        depth=3; s=d-6
+        P=dict(k_dest_d3=5+s, k_shot_d3=4+s//2, cap_d3=18+4*s,
+               k_dest_d2=9+s, k_shot_d2=7+s//2, cap_d2=42+8*s,
+               k_dest_d1=10, k_shot_d1=8, cap_d1=80)
     else:
-        # 11~15: 깊이4. 계산량 폭증을 막기 위해 상위층 브랜치 제한 강화
-        depth=4
-        t=d-10  # 1..5
+        depth=4; t=d-10
         P=dict(
-            # depth4: 매우 타이트
-            k_dest_d4=4 + (t//2),     k_shot_d4=3 + (t//3),   cap_d4=14 + 2*t,
-            # depth3
-            k_dest_d3=6 + (t//1),     k_shot_d3=4 + (t//2),   cap_d3=20 + 3*t,
-            # depth2
-            k_dest_d2=8 + (t//1),     k_shot_d2=6 + (t//2),   cap_d2=36 + 4*t,
-            # depth1
-            k_dest_d1=10,             k_shot_d1=8,            cap_d1=80
+            k_dest_d4=4+(t//2), k_shot_d4=3+(t//3), cap_d4=14+2*t,
+            k_dest_d3=6+(t//1), k_shot_d3=4+(t//2), cap_d3=20+3*t,
+            k_dest_d2=8+(t//1), k_shot_d2=6+(t//2), cap_d2=36+4*t,
+            k_dest_d1=10, k_shot_d1=8, cap_d1=80
         )
     return depth, P
 
@@ -208,13 +184,12 @@ def initial_board()->Board:
 def reset_game():
     st.session_state.board = initial_board()
     st.session_state.turn = HUM
-    st.session_state.phase = "select"  # select -> move -> shoot
+    st.session_state.phase = "select"
     st.session_state.sel_from = None
     st.session_state.sel_to = None
     st.session_state.legal = set()
     st.session_state.difficulty = st.session_state.get("difficulty", 6)
     st.session_state.cell_px = st.session_state.get("cell_px", 44)
-    # 하이라이트/엔드 상태
     st.session_state.last_human_move = None
     st.session_state.last_cpu_move = None
     st.session_state.last_shot_pos = None
@@ -245,7 +220,7 @@ with left:
 with right:
     diff = st.slider("난이도 (1 쉬움 ··· 15 매우 어려움)", 1, 15, st.session_state.get("difficulty",6))
     st.session_state.difficulty = diff
-    cell_px = st.slider("보드 크기(버튼 픽셀)", 36, 64, st.session_state.get("cell_px",44))
+    cell_px = st.slider("보드 칸 크기(픽셀)", 36, 64, st.session_state.get("cell_px",44))
     st.session_state.cell_px = cell_px
     c1,c2 = st.columns(2)
     if c1.button("새 게임", use_container_width=True):
@@ -256,26 +231,34 @@ with right:
         st.rerun()
 st.session_state.setdefault("hist", [])
 
-# ====== 보드 전용 CSS (정사각형 버튼 + 정사각형 보드 컨테이너/센터링) ======
+# ====== 정사각형 보드 CSS ======
 CELL_PX = int(st.session_state.cell_px)
-board_total_px = SIZE * (CELL_PX) + (SIZE * 4)  # 버튼+패딩 대략치
+# 버튼 간격(가로/세로 동일)  = 2px (아래 CSS와 일치)
+GAP = 2
+board_total_px = SIZE * CELL_PX + (SIZE-1) * GAP
+
 st.markdown(
     f"""
     <style>
+    /* 보드를 정확히 정사각형으로 (가로=세로) */
     .board-wrap {{
         width: {board_total_px}px;
-        margin: 0 auto;                 /* 가운데 정렬 */
+        height: {board_total_px}px;       /* 정사각형 핵심 */
+        margin: 0 auto;                   /* 가운데 정렬 */
         display: block;
     }}
-    .board-grid {{                         /* 그리드 전체를 감싸는 컨테이너 */
-        display: block;
-    }}
-    .board-grid div[data-testid="column"] {{
-        padding: 2px !important;
-    }}
+    /* Streamlit 기본 여백/갭 제거 */
+    .board-grid [data-testid="stVerticalBlock"] {{ gap: 0 !important; }}
+    .board-grid [data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
+    .board-grid div[data-testid="column"] {{ padding: 0 {GAP/2}px !important; }}
+    .board-row {{ margin-bottom: {GAP}px; }} /* 행 간격, 가로/세로 동일하게 */
+    .board-row:last-child {{ margin-bottom: 0; }}
+
+    /* 버튼을 완전한 정사각형으로 고정 */
     .board-grid .stButton > button {{
         width: {CELL_PX}px !important;
         height: {CELL_PX}px !important;
+        aspect-ratio: 1 / 1 !important;   /* 이중 안전장치 */
         margin: 0 !important;
         padding: 0 !important;
         line-height: {CELL_PX}px !important;
@@ -283,9 +266,7 @@ st.markdown(
         font-size: {int(CELL_PX*0.45)}px !important;
         display: inline-flex; align-items: center; justify-content: center;
     }}
-    .board-grid .stButton > button:disabled {{
-        opacity: 1.0 !important;
-    }}
+    .board-grid .stButton > button:disabled {{ opacity: 1.0 !important; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -295,7 +276,6 @@ board: Board = st.session_state.board
 
 # ================= 렌더/입력 =================
 def cell_label(r:int,c:int)->str:
-    """기본 말 + 강한 하이라이트(🟩 이동 / 🟥 사격) + 보조(◉ 선택 / ✓ 방금 이동 / ✳ 최근 블록)"""
     label = EMO_EMP
     cell = board[r][c]
     if cell==HUM: label = EMO_HUM
@@ -358,17 +338,19 @@ def on_click(r:int,c:int):
             st.session_state.highlight_to = None
             st.rerun()
 
-# 상단 캡션(승리 라벨 표시)
+# 상단 캡션
 who = st.session_state.winner
 caption_hum = f"{EMO_HUM}=플레이어(선턴)" + (" (승리)" if who=="플레이어" else "")
 caption_cpu = f"{EMO_CPU}=컴퓨터(후턴)" + (" (승리)" if who=="컴퓨터" else "")
 st.subheader("보드")
 st.caption(f"{caption_hum}  {caption_cpu}  {EMO_BLK}=블록  ({EMO_MOVE} 이동 가능, {EMO_SHOT} 사격 가능 · ◉ 선택 · ✓ 방금 이동 · ✳ 최근 블록)")
 
-# 보드 렌더 (정사각형 버튼 + 중앙 정렬 래퍼)
+# ===== 보드 렌더 (정사각형 버튼 + 중앙 정렬 래퍼) =====
 st.markdown('<div class="board-wrap"><div class="board-grid">', unsafe_allow_html=True)
 for r in range(SIZE):
-    cols = st.columns(SIZE)
+    # 행 간격을 일정하게: CSS에서 .board-row로 수직 간격 통일
+    st.markdown('<div class="board-row">', unsafe_allow_html=True)
+    cols = st.columns(SIZE, gap="small")
     for c in range(SIZE):
         label = cell_label(r,c)
         clickable = False
@@ -379,6 +361,7 @@ for r in range(SIZE):
                 clickable=True
         if cols[c].button(label, key=f"cell_{r}_{c}", disabled=not clickable):
             on_click(r,c)
+    st.markdown('</div>', unsafe_allow_html=True)
 st.markdown("</div></div>", unsafe_allow_html=True)
 
 # ================= 엔드체크 & AI =================
