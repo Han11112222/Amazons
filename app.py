@@ -12,13 +12,13 @@ SIZE = 10
 EMPTY, HUM, CPU, BLOCK = 0, 1, 2, 3
 DIRS = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]
 
-# 이모지 (요청 반영: 선턴=파랑, 후턴=라임 느낌의 초록)
-EMO_HUM = "🔵"   # 플레이어(선턴)
-EMO_CPU = "🟢"   # 컴퓨터(후턴, 라임 느낌)
-EMO_BLK = "⬛"   # 블록
-EMO_EMP = "·"   # 빈칸
-EMO_MOVE = "🟩"  # 이동 가능
-EMO_SHOT = "🟥"  # 사격 가능
+# 이모지 (요청 반영: 선턴=파랑, 후턴=라임)
+EMO_HUM = "🔵"    # 플레이어(선턴)
+EMO_CPU = "🟢"    # 컴퓨터(후턴)
+EMO_BLK = "⬛"    # 블록
+EMO_EMP = "·"    # 빈칸
+EMO_MOVE = "🟩"   # 이동 가능
+EMO_SHOT = "🟥"   # 사격 가능
 
 @dataclass
 class Move:
@@ -28,7 +28,7 @@ class Move:
 
 Board = List[List[int]]
 
-# ================= 보드/규칙 유틸 =================
+# ================= 유틸 =================
 def in_bounds(r:int,c:int)->bool:
     return 0 <= r < SIZE and 0 <= c < SIZE
 
@@ -65,7 +65,7 @@ def apply_move(b:Board, mv:Move, side:int)->Board:
 def has_any_move(b:Board, side:int)->bool:
     return any(legal_dests_from(b,r,c) for r,c in piece_positions(b, side))
 
-# ================= 평가/AI(간결) =================
+# ================= 평가/AI =================
 def mobility(b:Board, side:int)->int:
     return sum(len(legal_dests_from(b,r,c)) for r,c in piece_positions(b, side))
 
@@ -189,7 +189,8 @@ def reset_game():
     st.session_state.sel_to = None
     st.session_state.legal = set()
     st.session_state.difficulty = st.session_state.get("difficulty", 6)
-    st.session_state.cell_px = st.session_state.get("cell_px", 44)
+    # 픽셀 슬라이더 제거: 고정값 사용
+    st.session_state.cell_px = 48
     st.session_state.last_human_move = None
     st.session_state.last_cpu_move = None
     st.session_state.last_shot_pos = None
@@ -220,8 +221,6 @@ with left:
 with right:
     diff = st.slider("난이도 (1 쉬움 ··· 15 매우 어려움)", 1, 15, st.session_state.get("difficulty",6))
     st.session_state.difficulty = diff
-    cell_px = st.slider("보드 칸 크기(픽셀)", 36, 64, st.session_state.get("cell_px",44))
-    st.session_state.cell_px = cell_px
     c1,c2 = st.columns(2)
     if c1.button("새 게임", use_container_width=True):
         reset_game(); st.rerun()
@@ -233,32 +232,30 @@ st.session_state.setdefault("hist", [])
 
 # ====== 정사각형 보드 CSS ======
 CELL_PX = int(st.session_state.cell_px)
-# 버튼 간격(가로/세로 동일)  = 2px (아래 CSS와 일치)
-GAP = 2
+GAP = 4  # 행/열 동일 간격
 board_total_px = SIZE * CELL_PX + (SIZE-1) * GAP
 
 st.markdown(
     f"""
     <style>
-    /* 보드를 정확히 정사각형으로 (가로=세로) */
+    /* 보드: 가로만 고정해 중앙정렬. 세로는 내용 높이에 맞춤(불필요한 큰 높이 제거) */
     .board-wrap {{
         width: {board_total_px}px;
-        height: {board_total_px}px;       /* 정사각형 핵심 */
-        margin: 0 auto;                   /* 가운데 정렬 */
+        margin: 0 auto;              /* 가운데 정렬 */
         display: block;
     }}
-    /* Streamlit 기본 여백/갭 제거 */
+    /* Streamlit 기본 gap/패딩 최소화 → 위쪽 여백 과다 문제 방지 */
     .board-grid [data-testid="stVerticalBlock"] {{ gap: 0 !important; }}
     .board-grid [data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
     .board-grid div[data-testid="column"] {{ padding: 0 {GAP/2}px !important; }}
-    .board-row {{ margin-bottom: {GAP}px; }} /* 행 간격, 가로/세로 동일하게 */
+    .board-row {{ margin-bottom: {GAP}px; }}
     .board-row:last-child {{ margin-bottom: 0; }}
 
-    /* 버튼을 완전한 정사각형으로 고정 */
+    /* 칸(버튼) 완전한 정사각형 */
     .board-grid .stButton > button {{
         width: {CELL_PX}px !important;
         height: {CELL_PX}px !important;
-        aspect-ratio: 1 / 1 !important;   /* 이중 안전장치 */
+        aspect-ratio: 1 / 1 !important;
         margin: 0 !important;
         padding: 0 !important;
         line-height: {CELL_PX}px !important;
@@ -290,124 +287,3 @@ def cell_label(r:int,c:int)->str:
 
     if st.session_state.turn==HUM and st.session_state.sel_from==(r,c) and st.session_state.phase in ("move","shoot"):
         label += "◉"
-    if st.session_state.highlight_to == (r,c):
-        label += "✓"
-    hm = st.session_state.last_human_move
-    cm = st.session_state.last_cpu_move
-    if hm and hm.to==(r,c): label += "✓"
-    if cm and cm.to==(r,c): label += "✓"
-    if st.session_state.last_shot_pos == (r,c) and cell==BLOCK:
-        label += "✳"
-    return label
-
-def on_click(r:int,c:int):
-    if st.session_state.game_over: return
-    if st.session_state.turn!=HUM: return
-    phase = st.session_state.phase
-
-    if phase=="select":
-        if board[r][c]==HUM:
-            st.session_state.sel_from = (r,c)
-            st.session_state.legal = set(legal_dests_from(board,r,c))
-            st.session_state.phase = "move"
-            st.rerun()
-
-    elif phase=="move":
-        if (r,c) in st.session_state.legal:
-            fr = st.session_state.sel_from
-            nb = clone(board); nb[fr[0]][fr[1]] = EMPTY; nb[r][c] = HUM
-            st.session_state.board = nb
-            st.session_state.sel_to = (r,c)
-            st.session_state.highlight_to = (r,c)
-            st.session_state.legal = set(legal_shots_from(nb,r,c))
-            st.session_state.phase = "shoot"
-            st.rerun()
-
-    elif phase=="shoot":
-        if (r,c) in st.session_state.legal:
-            st.session_state.board[r][c] = BLOCK
-            st.session_state.last_shot_pos = (r,c)
-            hm = Move(st.session_state.sel_from, st.session_state.sel_to, (r,c))
-            st.session_state.last_human_move = hm
-            st.session_state.hist.append(clone(board))
-            st.session_state.turn = CPU
-            st.session_state.phase = "select"
-            st.session_state.sel_from = None
-            st.session_state.sel_to = None
-            st.session_state.legal = set()
-            st.session_state.highlight_to = None
-            st.rerun()
-
-# 상단 캡션
-who = st.session_state.winner
-caption_hum = f"{EMO_HUM}=플레이어(선턴)" + (" (승리)" if who=="플레이어" else "")
-caption_cpu = f"{EMO_CPU}=컴퓨터(후턴)" + (" (승리)" if who=="컴퓨터" else "")
-st.subheader("보드")
-st.caption(f"{caption_hum}  {caption_cpu}  {EMO_BLK}=블록  ({EMO_MOVE} 이동 가능, {EMO_SHOT} 사격 가능 · ◉ 선택 · ✓ 방금 이동 · ✳ 최근 블록)")
-
-# ===== 보드 렌더 (정사각형 버튼 + 중앙 정렬 래퍼) =====
-st.markdown('<div class="board-wrap"><div class="board-grid">', unsafe_allow_html=True)
-for r in range(SIZE):
-    # 행 간격을 일정하게: CSS에서 .board-row로 수직 간격 통일
-    st.markdown('<div class="board-row">', unsafe_allow_html=True)
-    cols = st.columns(SIZE, gap="small")
-    for c in range(SIZE):
-        label = cell_label(r,c)
-        clickable = False
-        if not st.session_state.game_over and st.session_state.turn==HUM:
-            if st.session_state.phase=="select" and board[r][c]==HUM:
-                clickable=True
-            elif st.session_state.phase in ("move","shoot") and (r,c) in st.session_state.legal:
-                clickable=True
-        if cols[c].button(label, key=f"cell_{r}_{c}", disabled=not clickable):
-            on_click(r,c)
-    st.markdown('</div>', unsafe_allow_html=True)
-st.markdown("</div></div>", unsafe_allow_html=True)
-
-# ================= 엔드체크 & AI =================
-def end_game(winner_label: str, human_win: bool):
-    st.session_state.game_over = True
-    st.session_state.winner = winner_label
-    st.session_state.show_dialog = True
-    if human_win:
-        st.balloons()
-
-def announce_and_set(who: str, ok=True):
-    color = "#16a34a" if ok else "#dc2626"
-    st.markdown(
-        f"<div style='padding:8px;border-radius:8px;background:{'#ecfdf5' if ok else '#fef2f2'};color:{color}'><b>{who} 승리!</b></div>",
-        unsafe_allow_html=True
-    )
-
-# 내 차례에서 더 이상 둘 곳이 없으면 컴퓨터 승리
-if not st.session_state.game_over:
-    if st.session_state.turn==HUM:
-        if not has_any_move(board,HUM):
-            announce_and_set("컴퓨터", ok=False)
-            end_game("컴퓨터", human_win=False)
-
-# 컴퓨터 차례 처리
-if not st.session_state.game_over and st.session_state.turn==CPU:
-    if not has_any_move(board,CPU):
-        announce_and_set("플레이어", ok=True)
-        end_game("플레이어", human_win=True)
-    else:
-        with st.spinner("컴퓨터 생각중..."):
-            mv = ai_move(board, st.session_state.difficulty)
-            if mv is None:
-                announce_and_set("플레이어", ok=True)
-                end_game("플레이어", human_win=True)
-            else:
-                st.session_state.board = apply_move(board, mv, CPU)
-                st.session_state.last_cpu_move = mv
-                st.session_state.last_shot_pos = mv.shot
-                st.session_state.turn = HUM
-                st.session_state.phase = "select"
-                st.session_state.sel_from = None
-                st.session_state.sel_to = None
-                st.session_state.legal = set()
-        st.rerun()
-
-# 팝업 열기
-if st.session_state.show_dialog and st.session_state.winner:
-    winner_dialog(st.session_state.winner)
