@@ -287,3 +287,120 @@ def cell_label(r:int,c:int)->str:
 
     if st.session_state.turn==HUM and st.session_state.sel_from==(r,c) and st.session_state.phase in ("move","shoot"):
         label += "◉"
+    if st.session_state.highlight_to == (r,c):
+        label += "✓"
+    hm = st.session_state.last_human_move
+    cm = st.session_state.last_cpu_move
+    if hm and hm.to==(r,c): label += "✓"
+    if cm and cm.to==(r,c): label += "✓"
+    if st.session_state.last_shot_pos == (r,c) and cell==BLOCK:
+        label += "✳"
+    return label
+
+def on_click(r:int,c:int):
+    if st.session_state.game_over: return
+    if st.session_state.turn!=HUM: return
+    phase = st.session_state.phase
+
+    if phase=="select":
+        if board[r][c]==HUM:
+            st.session_state.sel_from = (r,c)
+            st.session_state.legal = set(legal_dests_from(board,r,c))
+            st.session_state.phase = "move"
+            st.rerun()
+
+    elif phase=="move":
+        if (r,c) in st.session_state.legal:
+            fr = st.session_state.sel_from
+            nb = clone(board); nb[fr[0]][fr[1]] = EMPTY; nb[r][c] = HUM
+            st.session_state.board = nb
+            st.session_state.sel_to = (r,c)
+            st.session_state.highlight_to = (r,c)
+            st.session_state.legal = set(legal_shots_from(nb,r,c))
+            st.session_state.phase = "shoot"
+            st.rerun()
+
+    elif phase=="shoot":
+        if (r,c) in st.session_state.legal:
+            st.session_state.board[r][c] = BLOCK
+            st.session_state.last_shot_pos = (r,c)
+            hm = Move(st.session_state.sel_from, st.session_state.sel_to, (r,c))
+            st.session_state.last_human_move = hm
+            st.session_state.hist.append(clone(board))
+            st.session_state.turn = CPU
+            st.session_state.phase = "select"
+            st.session_state.sel_from = None
+            st.session_state.sel_to = None
+            st.session_state.legal = set()
+            st.session_state.highlight_to = None
+            st.rerun()
+
+# 상단 캡션
+who = st.session_state.winner
+caption_hum = f"{EMO_HUM}=플레이어(선턴)" + (" (승리)" if who=="플레이어" else "")
+caption_cpu = f"{EMO_CPU}=컴퓨터(후턴)" + (" (승리)" if who=="컴퓨터" else "")
+st.subheader("보드")
+st.caption(f"{caption_hum}  {caption_cpu}  {EMO_BLK}=블록  ({EMO_MOVE} 이동 가능, {EMO_SHOT} 사격 가능 · ◉ 선택 · ✓ 방금 이동 · ✳ 최근 블록)")
+
+# ===== 보드 렌더 (정사각형 버튼 + 중앙 정렬 래퍼) =====
+st.markdown('<div class="board-wrap"><div class="board-grid">', unsafe_allow_html=True)
+for r in range(SIZE):
+    st.markdown('<div class="board-row">', unsafe_allow_html=True)
+    cols = st.columns(SIZE, gap="small")
+    for c in range(SIZE):
+        label = cell_label(r,c)
+        clickable = False
+        if not st.session_state.game_over and st.session_state.turn==HUM:
+            if st.session_state.phase=="select" and board[r][c]==HUM:
+                clickable=True
+            elif st.session_state.phase in ("move","shoot") and (r,c) in st.session_state.legal:
+                clickable=True
+        if cols[c].button(label, key=f"cell_{r}_{c}", disabled=not clickable):
+            on_click(r,c)
+    st.markdown('</div>', unsafe_allow_html=True)
+st.markdown("</div></div>", unsafe_allow_html=True)
+
+# ================= 엔드체크 & AI =================
+def end_game(winner_label: str, human_win: bool):
+    st.session_state.game_over = True
+    st.session_state.winner = winner_label
+    st.session_state.show_dialog = True
+    if human_win:
+        st.balloons()
+
+def announce_and_set(who: str, ok=True):
+    color = "#16a34a" if ok else "#dc2626"
+    st.markdown(
+        f"<div style='padding:8px;border-radius:8px;background:{'#ecfdf5' if ok else '#fef2f2'};color:{color}'><b>{who} 승리!</b></div>",
+        unsafe_allow_html=True
+    )
+
+if not st.session_state.game_over:
+    if st.session_state.turn==HUM and not has_any_move(board,HUM):
+        announce_and_set("컴퓨터", ok=False)
+        end_game("컴퓨터", human_win=False)
+
+if not st.session_state.game_over and st.session_state.turn==CPU:
+    if not has_any_move(board,CPU):
+        announce_and_set("플레이어", ok=True)
+        end_game("플레이어", human_win=True)
+    else:
+        with st.spinner("컴퓨터 생각중..."):
+            mv = ai_move(board, st.session_state.difficulty)
+            if mv is None:
+                announce_and_set("플레이어", ok=True)
+                end_game("플레이어", human_win=True)
+            else:
+                st.session_state.board = apply_move(board, mv, CPU)
+                st.session_state.last_cpu_move = mv
+                st.session_state.last_shot_pos = mv.shot
+                st.session_state.turn = HUM
+                st.session_state.phase = "select"
+                st.session_state.sel_from = None
+                st.session_state.sel_to = None
+                st.session_state.legal = set()
+        st.rerun()
+
+# 팝업 열기
+if st.session_state.show_dialog and st.session_state.winner:
+    winner_dialog(st.session_state.winner)
