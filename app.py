@@ -17,12 +17,10 @@ EMO_HUM, EMO_CPU, EMO_BLK, EMO_EMP, EMO_MOVE, EMO_SHOT = "🔵","🟢","⬛","·
 # 인당 제한시간(초) — 10분
 TIME_LIMIT = 10 * 60
 
-# rerun 호환(클라우드 버전 차이 대비)
+# rerun 호환
 def _rerun():
-    try:
-        st.rerun()
-    except Exception:
-        st.experimental_rerun()
+    try: st.rerun()
+    except Exception: st.experimental_rerun()
 
 @dataclass
 class Move:
@@ -214,18 +212,19 @@ def _switch_turn(to_side:int):
     st.session_state.highlight_to=None
     st.session_state.turn_start = time.time()
 
-# ----------------- 상단 UI (타이머 포함) -----------------
-left, right = st.columns([1,1])
-with left:
+# ----------------- 상단 UI (타이머) -----------------
+l, r = st.columns([1,1])
+with l:
+    st.subheader("보드")
     st.caption(f"{EMO_HUM}=플레이어(선턴)  {EMO_CPU}=컴퓨터(후턴)  {EMO_BLK}=블록  ({EMO_MOVE} 이동, {EMO_SHOT} 사격 · ◉ 선택 · ✓ 방금 이동 · ✳ 최근 블록)")
     hum_used = _current_used(HUM); cpu_used = _current_used(CPU)
     hum_rem = max(0, TIME_LIMIT - int(hum_used)); cpu_rem = max(0, TIME_LIMIT - int(cpu_used))
     st.markdown(
         f"**⏱ 누적시간**  \n"
         f"- {EMO_HUM} 플레이어: **{int(hum_used//60):02d}:{int(hum_used%60):02d}** (잔여 {hum_rem//60:02d}:{hum_rem%60:02d})  \n"
-        f"- {EMO_CPU} 컴퓨터: **{int(cpu_used//60):02d}:{int(cpu_used%60):02d}** (잔여 {cpu_rem//60:02d}:{cpu_rem%60:02d})"
+        f"- {EMO_CPU} 컴퓨터: **{int(cpu_used//60):02d}:{int(cpu_used%60):02d}** (잔여 {cpu_rem//60):02d}:{cpu_rem%60:02d})"
     )
-with right:
+with r:
     diff = st.slider("난이도 (1 쉬움 ··· 15 매우 어려움)", 1, 15, st.session_state.difficulty)
     st.session_state.difficulty = diff
     c1, c2 = st.columns(2)
@@ -239,40 +238,23 @@ with right:
             st.session_state.turn_start = time.time()
         _rerun()
 
-# ----------------- 정사각형 보드 CSS(핵심 수정) -----------------
+# ----------------- 보드 전용 CSS (정사각형, 빈 박스 제거) -----------------
 CELL = int(st.session_state.cell_px)
 GAP  = 8
-board_total_px = SIZE * CELL + (SIZE-1) * GAP  # 가로·세로 동일(진짜 정사각)
+board_total_px = SIZE * CELL + (SIZE-1) * GAP  # 이 값이 가로=세로가 되도록 설계
 
 st.markdown(
     f"""
     <style>
-      /* 페이지 폭을 보드 폭에 맞춤 → 가로로 늘어나며 비율 깨지는 현상 방지 */
-      .block-container {{ max-width: {board_total_px + 120}px !important; }}
-
-      /* 보드 외곽: width==height 픽셀 고정 */
-      .board-wrap {{
-        width: {board_total_px}px;
-        height: {board_total_px}px;
-        margin: 6px auto 12px auto;
-        padding: {GAP/2}px;
-        border: 2px solid #94a3b8;
-        border-radius: 12px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-        position: relative;
-        z-index: 2;
-        background: white;
-      }}
-
-      /* 최신 Streamlit DOM까지 gap 강제 */
+      /* 행 컨테이너의 컬럼 간격을 최신 DOM까지 강제 고정 */
       .board-row [data-testid="stHorizontalBlock"] {{ gap: {GAP}px !important; }}
       .board-row div[data-testid="column"] {{ padding: 0 !important; }}
 
-      /* 행 간격도 GAP으로 통일 → 세로 길이 = 가로 길이 */
+      /* 행 간격도 GAP으로 통일 → 전체 세로 길이 = 보드 가로 길이 */
       .board-row {{ margin-bottom: {GAP}px; }}
       .board-row:last-child {{ margin-bottom: 0; }}
 
-      /* 칸 버튼: 완전 정사각형 + 클릭 우선권 */
+      /* 버튼을 완전한 정사각형으로 */
       .board-grid .stButton > button {{
         width: {CELL}px !important;
         height: {CELL}px !important;
@@ -285,8 +267,7 @@ st.markdown(
         background: white !important;
         font-size: {int(CELL*0.45)}px !important;
         display: inline-flex; align-items: center; justify-content: center;
-        position: relative;
-        z-index: 3;
+        position: relative; z-index: 3;
       }}
       .board-grid .stButton > button:disabled {{ opacity: 1.0 !important; }}
     </style>
@@ -332,7 +313,7 @@ def on_click(r:int,c:int):
         return
     if phase=="shoot":
         if (r,c) in st.session_state.legal:
-            _accumulate_time(HUM)  # 턴 종료 직전 누적
+            _accumulate_time(HUM)
             st.session_state.board[r][c] = BLOCK
             st.session_state.last_shot_pos=(r,c)
             st.session_state.last_human_move = Move(st.session_state.sel_from, st.session_state.sel_to, (r,c))
@@ -341,11 +322,8 @@ def on_click(r:int,c:int):
             _rerun()
         return
 
-# 상단 안내
-st.subheader("보드")
-
-# 보드 렌더 (항상 클릭 허용 — 유효성은 on_click에서 필터)
-st.markdown('<div class="board-wrap"><div class="board-grid">', unsafe_allow_html=True)
+# 실제 보드 렌더 (빈 박스 wrapper 없이, grid만)
+st.markdown('<div class="board-grid">', unsafe_allow_html=True)
 for r in range(SIZE):
     st.markdown('<div class="board-row">', unsafe_allow_html=True)
     cols = st.columns(SIZE)
@@ -353,7 +331,7 @@ for r in range(SIZE):
         if cols[c].button(cell_label(r,c), key=f"cell_{r}_{c}"):
             on_click(r,c)
     st.markdown('</div>', unsafe_allow_html=True)
-st.markdown("</div></div>", unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 # ----------------- 엔드체크 & AI -----------------
 def end_game(winner_label: str, human_win: bool):
@@ -370,7 +348,6 @@ def announce_and_set(who: str, ok=True):
     bg = "#ecfdf5" if ok else "#fef2f2"
     st.markdown(f"<div style='padding:8px;border-radius:8px;background:{bg};color:{color}'><b>{who} 승리!</b></div>", unsafe_allow_html=True)
 
-# 시간초과 체크
 _check_flagfall()
 
 if not st.session_state.game_over:
@@ -384,7 +361,7 @@ if not st.session_state.game_over and st.session_state.turn==CPU:
         with st.spinner("컴퓨터 생각중..."):
             ai_t0 = time.time()
             mv = ai_move(board, st.session_state.difficulty)
-            st.session_state.cpu_time += max(0.0, time.time() - ai_t0)  # AI 시간 누적
+            st.session_state.cpu_time += max(0.0, time.time() - ai_t0)
             if mv is None:
                 announce_and_set("플레이어", ok=True); end_game("플레이어", human_win=True)
             else:
@@ -393,5 +370,3 @@ if not st.session_state.game_over and st.session_state.turn==CPU:
                 st.session_state.last_shot_pos = mv.shot
                 _switch_turn(HUM)
         _rerun()
-
-# —— 불필요한 리스트/디버그 출력 없음 ——
