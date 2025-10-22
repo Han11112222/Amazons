@@ -185,34 +185,24 @@ with r:
 # ----------------- 정사각형 보드 CSS -----------------
 CELL = int(st.session_state.cell_px)
 GAP  = 8  # 행/열 동일 간격(px)
-
 board_total_px = SIZE * CELL + (SIZE-1) * GAP
 
 st.markdown(
     f"""
     <style>
-      /* 전체 안내 캡션과 보드 사이 여백 최소화 */
       section.main > div:has(> div:nth-child(3)) {{ padding-top: 0 !important; }}
-
-      /* 보드 외곽 컨테이너(가운데 정렬 + 외곽 테두리) */
       .board-wrap {{
         width: {board_total_px}px;
         margin: 6px auto 12px auto;
-        padding: {GAP/2}px;                 /* 외곽 테두리와 칸 사이 여백 */
-        border: 2px solid #94a3b8;          /* 보드 외곽 테두리 */
+        padding: {GAP/2}px;
+        border: 2px solid #94a3b8;
         border-radius: 12px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.06);
       }}
-
-      /* Streamlit columns 사용 시 발생하는 가변 gap 제거 */
       .board-row .stColumns {{ gap: {GAP}px !important; }}
       .board-row div[data-testid="column"] {{ padding: 0 !important; }}
-
-      /* 행 간격도 GAP으로 통일 → 세로 길이 = 가로 길이 */
       .board-row {{ margin-bottom: {GAP}px; }}
       .board-row:last-child {{ margin-bottom: 0; }}
-
-      /* 모든 칸(버튼) 완전한 정사각형 + 테두리 */
       .board-grid .stButton > button {{
         width: {CELL}px !important;
         height: {CELL}px !important;
@@ -221,7 +211,7 @@ st.markdown(
         padding: 0 !important;
         line-height: {CELL}px !important;
         border-radius: 10px !important;
-        border: 1.5px solid #cbd5e1 !important;   /* 칸 테두리 */
+        border: 1.5px solid #cbd5e1 !important;
         background: white !important;
         font-size: {int(CELL*0.45)}px !important;
         display: inline-flex; align-items: center; justify-content: center;
@@ -250,28 +240,36 @@ def cell_label(r:int,c:int)->str:
     return label
 
 def on_click(r:int,c:int):
-    if st.session_state.game_over or st.session_state.turn!=HUM: return
+    # 유효하지 않은 상황은 모두 무시 (항상 클릭 가능하므로 여기서 필터)
+    if st.session_state.game_over or st.session_state.turn!=HUM:
+        return
     phase = st.session_state.phase
-    if phase=="select" and board[r][c]==HUM:
-        st.session_state.sel_from=(r,c)
-        st.session_state.legal=set(legal_dests_from(board,r,c))
-        st.session_state.phase="move"; st.rerun()
-    elif phase=="move" and (r,c) in st.session_state.legal:
-        fr = st.session_state.sel_from
-        nb = clone(board); nb[fr[0]][fr[1]] = EMPTY; nb[r][c] = HUM
-        st.session_state.board = nb
-        st.session_state.sel_to = (r,c); st.session_state.highlight_to=(r,c)
-        st.session_state.legal=set(legal_shots_from(nb,r,c))
-        st.session_state.phase="shoot"; st.rerun()
-    elif phase=="shoot" and (r,c) in st.session_state.legal:
-        st.session_state.board[r][c] = BLOCK
-        st.session_state.last_shot_pos=(r,c)
-        st.session_state.last_human_move = Move(st.session_state.sel_from, st.session_state.sel_to, (r,c))
-        st.session_state.hist.append(clone(board))
-        st.session_state.turn=CPU; st.session_state.phase="select"
-        st.session_state.sel_from=None; st.session_state.sel_to=None
-        st.session_state.legal=set(); st.session_state.highlight_to=None
-        st.rerun()
+    if phase=="select":
+        if board[r][c]==HUM:
+            st.session_state.sel_from=(r,c)
+            st.session_state.legal=set(legal_dests_from(board,r,c))
+            st.session_state.phase="move"; st.rerun()
+        return
+    if phase=="move":
+        if (r,c) in st.session_state.legal:
+            fr = st.session_state.sel_from
+            nb = clone(board); nb[fr[0]][fr[1]] = EMPTY; nb[r][c] = HUM
+            st.session_state.board = nb
+            st.session_state.sel_to = (r,c); st.session_state.highlight_to=(r,c)
+            st.session_state.legal=set(legal_shots_from(nb,r,c))
+            st.session_state.phase="shoot"; st.rerun()
+        return
+    if phase=="shoot":
+        if (r,c) in st.session_state.legal:
+            st.session_state.board[r][c] = BLOCK
+            st.session_state.last_shot_pos=(r,c)
+            st.session_state.last_human_move = Move(st.session_state.sel_from, st.session_state.sel_to, (r,c))
+            st.session_state.hist.append(clone(board))
+            st.session_state.turn=CPU; st.session_state.phase="select"
+            st.session_state.sel_from=None; st.session_state.sel_to=None
+            st.session_state.legal=set(); st.session_state.highlight_to=None
+            st.rerun()
+        return
 
 # 라벨
 who = st.session_state.winner
@@ -285,11 +283,8 @@ for r in range(SIZE):
     cols = st.columns(SIZE)  # gap은 CSS로 강제 통일
     for c in range(SIZE):
         label = cell_label(r,c)
-        clickable = False
-        if not st.session_state.game_over and st.session_state.turn==HUM:
-            if st.session_state.phase=="select" and board[r][c]==HUM: clickable=True
-            elif st.session_state.phase in ("move","shoot") and (r,c) in st.session_state.legal: clickable=True
-        if cols[c].button(label, key=f"cell_{r}_{c}", disabled=not clickable):
+        # 항상 클릭 가능 → 유효성은 on_click에서 판정
+        if cols[c].button(label, key=f"cell_{r}_{c}"):
             on_click(r,c)
     st.markdown('</div>', unsafe_allow_html=True)
 st.markdown("</div></div>", unsafe_allow_html=True)
