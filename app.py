@@ -221,8 +221,8 @@ with l:
     hum_rem = max(0, TIME_LIMIT - int(hum_used)); cpu_rem = max(0, TIME_LIMIT - int(cpu_used))
     st.markdown(
         f"**⏱ 누적시간**  \n"
-        f"- {EMO_HUM} 플레이어: **{int(hum_used//60):02d}:{int(hum_used%60):02d}** (잔여 {hum_rem//60:02d}:{hum_rem%60:02d})  \n"
-        f"- {EMO_CPU} 컴퓨터: **{int(cpu_used//60):02d}:{int(cpu_used%60):02d}** (잔여 {cpu_rem//60):02d}:{cpu_rem%60:02d})"
+        f"- {EMO_HUM} 플레이어: **{int(hum_used//60):02d}:{int(hum_used%60):02d}** (잔여 {int(hum_rem//60):02d}:{int(hum_rem%60):02d})  \n"
+        f"- {EMO_CPU} 컴퓨터: **{int(cpu_used//60):02d}:{int(cpu_used%60):02d}** (잔여 {int(cpu_rem//60):02d}:{int(cpu_rem%60):02d})"
     )
 with r:
     diff = st.slider("난이도 (1 쉬움 ··· 15 매우 어려움)", 1, 15, st.session_state.difficulty)
@@ -238,23 +238,16 @@ with r:
             st.session_state.turn_start = time.time()
         _rerun()
 
-# ----------------- 보드 전용 CSS (정사각형, 빈 박스 제거) -----------------
+# ----------------- 보드 전용 CSS (정사각형) -----------------
 CELL = int(st.session_state.cell_px)
 GAP  = 8
-board_total_px = SIZE * CELL + (SIZE-1) * GAP  # 이 값이 가로=세로가 되도록 설계
-
 st.markdown(
     f"""
     <style>
-      /* 행 컨테이너의 컬럼 간격을 최신 DOM까지 강제 고정 */
       .board-row [data-testid="stHorizontalBlock"] {{ gap: {GAP}px !important; }}
       .board-row div[data-testid="column"] {{ padding: 0 !important; }}
-
-      /* 행 간격도 GAP으로 통일 → 전체 세로 길이 = 보드 가로 길이 */
       .board-row {{ margin-bottom: {GAP}px; }}
       .board-row:last-child {{ margin-bottom: 0; }}
-
-      /* 버튼을 완전한 정사각형으로 */
       .board-grid .stButton > button {{
         width: {CELL}px !important;
         height: {CELL}px !important;
@@ -322,7 +315,6 @@ def on_click(r:int,c:int):
             _rerun()
         return
 
-# 실제 보드 렌더 (빈 박스 wrapper 없이, grid만)
 st.markdown('<div class="board-grid">', unsafe_allow_html=True)
 for r in range(SIZE):
     st.markdown('<div class="board-row">', unsafe_allow_html=True)
