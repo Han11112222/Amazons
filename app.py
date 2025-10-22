@@ -12,12 +12,11 @@ EMPTY, HUM, CPU, BLOCK = 0, 1, 2, 3
 DIRS = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]
 
 # 이모지 (선턴=파랑, 후턴=라임)
-EMO_HUM, EMO_CPU, EMO_BLK, EMO_EMP, EMO_MOVE, EMO_SHOT = "🔵","🟢","⬛","·","🟩","🟥"
+# 블록은 붉은 사각형, 사격가능은 연한 초록으로 명확히 구분
+EMO_HUM, EMO_CPU, EMO_BLK, EMO_EMP, EMO_MOVE, EMO_SHOT = "🔵","🟢","🟥","·","🟩","🟢"
 
-# 인당 제한시간(초) — 10분
-TIME_LIMIT = 10 * 60
+TIME_LIMIT = 10 * 60  # 인당 10분
 
-# rerun 호환
 def _rerun():
     try: st.rerun()
     except Exception: st.experimental_rerun()
@@ -30,7 +29,7 @@ class Move:
 
 Board = List[List[int]]
 
-# ----------------- 보드/규칙 -----------------
+# ----------------- 규칙 -----------------
 def in_bounds(r:int,c:int)->bool: return 0 <= r < SIZE and 0 <= c < SIZE
 def clone(b:Board)->Board: return [row[:] for row in b]
 
@@ -46,7 +45,8 @@ def piece_positions(b:Board, side:int)->List[Tuple[int,int]]:
 def legal_dests_from(b:Board, r:int,c:int)->List[Tuple[int,int]]:
     out=[]; [out.extend(iter_ray(b,r,c,dr,dc)) for dr,dc in DIRS]; return out
 
-def legal_shots_from(b:Board, r:int,c:int)->List[Tuple[int,int]]: return legal_dests_from(b,r,c)
+def legal_shots_from(b:Board, r:int,c:int)->List[Tuple[int,int]]:
+    return legal_dests_from(b,r,c)
 
 def apply_move(b:Board, mv:Move, side:int)->Board:
     nb = clone(b); (r1,c1),(r2,c2),(rs,cs) = mv.fr, mv.to, mv.shot
@@ -156,7 +156,7 @@ def initial_board()->Board:
 def reset_game():
     st.session_state.board = initial_board()
     st.session_state.turn = HUM
-    st.session_state.phase = "select"
+    st.session_state.phase = "select"   # select -> move -> shoot
     st.session_state.sel_from = None
     st.session_state.sel_to = None
     st.session_state.legal = set()
@@ -180,7 +180,7 @@ else:
     if "turn_start" not in st.session_state or st.session_state.turn_start is None:
         st.session_state.turn_start = time.time()
 
-# ===== 타이머 유틸 =====
+# ===== 타이머 =====
 def _accumulate_time(side:int):
     now = time.time()
     elapsed = max(0.0, now - (st.session_state.turn_start or now))
@@ -212,7 +212,7 @@ def _switch_turn(to_side:int):
     st.session_state.highlight_to=None
     st.session_state.turn_start = time.time()
 
-# ----------------- 상단 UI (타이머) -----------------
+# ----------------- UI (타이머/컨트롤) -----------------
 l, r = st.columns([1,1])
 with l:
     st.subheader("보드")
@@ -238,7 +238,7 @@ with r:
             st.session_state.turn_start = time.time()
         _rerun()
 
-# ----------------- 보드 전용 CSS (정사각형) -----------------
+# ----------------- 보드 CSS (정사각형 + 클릭 우선권) -----------------
 CELL = int(st.session_state.cell_px)
 GAP  = 8
 st.markdown(
@@ -260,9 +260,12 @@ st.markdown(
         background: white !important;
         font-size: {int(CELL*0.45)}px !important;
         display: inline-flex; align-items: center; justify-content: center;
-        position: relative; z-index: 3;
+        position: relative; z-index: 3; pointer-events: auto !important;
+        cursor: pointer;
       }}
-      .board-grid .stButton > button:disabled {{ opacity: 1.0 !important; }}
+      .board-grid .stButton > button:disabled {{
+        opacity: 0.35 !important; cursor: not-allowed !important;
+      }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -289,38 +292,39 @@ def on_click(r:int,c:int):
     if st.session_state.game_over or st.session_state.turn!=HUM:
         return
     phase = st.session_state.phase
-    if phase=="select":
-        if board[r][c]==HUM:
-            st.session_state.sel_from=(r,c)
-            st.session_state.legal=set(legal_dests_from(board,r,c))
-            st.session_state.phase="move"; _rerun()
-        return
-    if phase=="move":
-        if (r,c) in st.session_state.legal:
-            fr = st.session_state.sel_from
-            nb = clone(board); nb[fr[0]][fr[1]] = EMPTY; nb[r][c] = HUM
-            st.session_state.board = nb
-            st.session_state.sel_to = (r,c); st.session_state.highlight_to=(r,c)
-            st.session_state.legal=set(legal_shots_from(nb,r,c))
-            st.session_state.phase="shoot"; _rerun()
-        return
-    if phase=="shoot":
-        if (r,c) in st.session_state.legal:
-            _accumulate_time(HUM)
-            st.session_state.board[r][c] = BLOCK
-            st.session_state.last_shot_pos=(r,c)
-            st.session_state.last_human_move = Move(st.session_state.sel_from, st.session_state.sel_to, (r,c))
-            st.session_state.hist.append(clone(board))
-            _switch_turn(CPU)
-            _rerun()
-        return
+    if phase=="select" and board[r][c]==HUM:
+        st.session_state.sel_from=(r,c)
+        st.session_state.legal=set(legal_dests_from(board,r,c))
+        st.session_state.phase="move"; _rerun(); return
+    if phase=="move" and (r,c) in st.session_state.legal:
+        fr = st.session_state.sel_from
+        nb = clone(board); nb[fr[0]][fr[1]] = EMPTY; nb[r][c] = HUM
+        st.session_state.board = nb
+        st.session_state.sel_to = (r,c); st.session_state.highlight_to=(r,c)
+        st.session_state.legal=set(legal_shots_from(nb,r,c))
+        st.session_state.phase="shoot"; _rerun(); return
+    if phase=="shoot" and (r,c) in st.session_state.legal:
+        _accumulate_time(HUM)
+        # 되돌리기용 보드 저장은 변경 전에
+        st.session_state.hist.append(clone(board))
+        st.session_state.board[r][c] = BLOCK
+        st.session_state.last_shot_pos=(r,c)
+        st.session_state.last_human_move = Move(st.session_state.sel_from, st.session_state.sel_to, (r,c))
+        _switch_turn(CPU)
+        _rerun(); return
 
+# 보드 렌더 — 합법 셀만 클릭 가능하게(disabled 제어)
 st.markdown('<div class="board-grid">', unsafe_allow_html=True)
 for r in range(SIZE):
     st.markdown('<div class="board-row">', unsafe_allow_html=True)
     cols = st.columns(SIZE)
     for c in range(SIZE):
-        if cols[c].button(cell_label(r,c), key=f"cell_{r}_{c}"):
+        label = cell_label(r,c)
+        clickable = False
+        if not st.session_state.game_over and st.session_state.turn==HUM:
+            if st.session_state.phase=="select" and board[r][c]==HUM: clickable=True
+            elif st.session_state.phase in ("move","shoot") and (r,c) in st.session_state.legal: clickable=True
+        if cols[c].button(label, key=f"cell_{r}_{c}", disabled=not clickable):
             on_click(r,c)
     st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
@@ -352,12 +356,12 @@ if not st.session_state.game_over and st.session_state.turn==CPU:
     else:
         with st.spinner("컴퓨터 생각중..."):
             ai_t0 = time.time()
-            mv = ai_move(board, st.session_state.difficulty)
+            mv = ai_move(st.session_state.board, st.session_state.difficulty)
             st.session_state.cpu_time += max(0.0, time.time() - ai_t0)
             if mv is None:
                 announce_and_set("플레이어", ok=True); end_game("플레이어", human_win=True)
             else:
-                st.session_state.board = apply_move(board, mv, CPU)
+                st.session_state.board = apply_move(st.session_state.board, mv, CPU)
                 st.session_state.last_cpu_move = mv
                 st.session_state.last_shot_pos = mv.shot
                 _switch_turn(HUM)
