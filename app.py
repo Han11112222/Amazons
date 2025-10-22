@@ -17,6 +17,13 @@ EMO_HUM, EMO_CPU, EMO_BLK, EMO_EMP, EMO_MOVE, EMO_SHOT = "🔵","🟢","⬛","·
 # 인당 제한시간(초)
 TIME_LIMIT = 10 * 60  # 10분
 
+# rerun 호환 헬퍼
+def _rerun():
+    try:
+        st.rerun()
+    except Exception:
+        st.experimental_rerun()
+
 @dataclass
 class Move:
     fr: Tuple[int,int]
@@ -164,22 +171,19 @@ def reset_game():
     st.session_state.game_over = False
     st.session_state.winner = None
     st.session_state.setdefault("hist", [])
-
     # 타이머
     st.session_state.hum_time = 0.0
     st.session_state.cpu_time = 0.0
-    st.session_state.turn_start = time.time()  # 첫 턴 시작 시각(HUM)
+    st.session_state.turn_start = time.time()
 
 if "board" not in st.session_state:
     reset_game()
 else:
-    # turn_start 누락 방지
     if "turn_start" not in st.session_state or st.session_state.turn_start is None:
         st.session_state.turn_start = time.time()
 
 # ===== 타이머 유틸 =====
 def _accumulate_time(side:int):
-    """현재 턴 소요시간을 누적하고 turn_start 갱신"""
     now = time.time()
     elapsed = max(0.0, now - (st.session_state.turn_start or now))
     if side == HUM:
@@ -189,7 +193,6 @@ def _accumulate_time(side:int):
     st.session_state.turn_start = now
 
 def _current_used(side:int)->float:
-    """표시용: 누적 + (진행중이면 실시간 가산)"""
     base = st.session_state.hum_time if side==HUM else st.session_state.cpu_time
     if st.session_state.turn == side and not st.session_state.game_over:
         now = time.time()
@@ -197,7 +200,6 @@ def _current_used(side:int)->float:
     return base
 
 def _check_flagfall():
-    """시간초과 체크"""
     if st.session_state.game_over: return
     if st.session_state.turn == HUM and _current_used(HUM) >= TIME_LIMIT:
         end_game("컴퓨터", human_win=False)
@@ -205,10 +207,7 @@ def _check_flagfall():
         end_game("플레이어", human_win=True)
 
 def _switch_turn(to_side:int):
-    """턴 전환(누적 후 전환)"""
-    # 현재 턴의 시간을 누적
     _accumulate_time(st.session_state.turn)
-    # 전환
     st.session_state.turn = to_side
     st.session_state.phase = "select"
     st.session_state.sel_from=None
@@ -221,42 +220,35 @@ def _switch_turn(to_side:int):
 left, right = st.columns([1,1])
 with left:
     st.title("Cool Choi Amazons")
-    # 타이머 표시
-    hum_used = _current_used(HUM)
-    cpu_used = _current_used(CPU)
-    hum_rem = max(0, TIME_LIMIT - int(hum_used))
-    cpu_rem = max(0, TIME_LIMIT - int(cpu_used))
+    hum_used = _current_used(HUM); cpu_used = _current_used(CPU)
+    hum_rem = max(0, TIME_LIMIT - int(hum_used)); cpu_rem = max(0, TIME_LIMIT - int(cpu_used))
     st.markdown(
-        f"""
-        **⏱ 누적시간**  
-        - {EMO_HUM} 플레이어: **{int(hum_used//60):02d}:{int(hum_used%60):02d}** (잔여 {hum_rem//60:02.0f}:{hum_rem%60:02.0f})  
-        - {EMO_CPU} 컴퓨터: **{int(cpu_used//60):02d}:{int(cpu_used%60):02d}** (잔여 {cpu_rem//60:02.0f}:{cpu_rem%60:02.0f})
-        """
+        f"**⏱ 누적시간**  \n"
+        f"- {EMO_HUM} 플레이어: **{int(hum_used//60):02d}:{int(hum_used%60):02d}** (잔여 {hum_rem//60:02d}:{hum_rem%60:02d})  \n"
+        f"- {EMO_CPU} 컴퓨터: **{int(cpu_used//60):02d}:{int(cpu_used%60):02d}** (잔여 {cpu_rem//60:02d}:{cpu_rem%60:02d})"
     )
 with right:
     diff = st.slider("난이도 (1 쉬움 ··· 15 매우 어려움)", 1, 15, st.session_state.difficulty)
     st.session_state.difficulty = diff
     c1, c2 = st.columns(2)
     if c1.button("새 게임", use_container_width=True):
-        reset_game(); st.rerun()
+        reset_game(); _rerun()
     if c2.button("되돌리기(1수)", use_container_width=True):
         if st.session_state.hist:
             st.session_state.board = st.session_state.hist.pop()
-            # 되돌리기 후에는 사람 턴으로 간주
             st.session_state.turn = HUM
             st.session_state.phase = "select"
             st.session_state.turn_start = time.time()
-        st.rerun()
+        _rerun()
 
 # ----------------- 정사각형 보드 CSS -----------------
 CELL = int(st.session_state.cell_px)
 GAP  = 8
-board_total_px = SIZE * CELL + (SIZE-1) * GAP  # 가로·세로 동일 (진짜 정사각형)
+board_total_px = SIZE * CELL + (SIZE-1) * GAP  # 가로·세로 동일
 
 st.markdown(
     f"""
     <style>
-      /* 보드 외곽 컨테이너: 진짜 정사각형 + 클릭 우선권(z-index) */
       .board-wrap {{
         width: {board_total_px}px;
         height: {board_total_px}px;
@@ -319,7 +311,7 @@ def on_click(r:int,c:int):
         if board[r][c]==HUM:
             st.session_state.sel_from=(r,c)
             st.session_state.legal=set(legal_dests_from(board,r,c))
-            st.session_state.phase="move"; st.rerun()
+            st.session_state.phase="move"; _rerun()
         return
     if phase=="move":
         if (r,c) in st.session_state.legal:
@@ -328,25 +320,22 @@ def on_click(r:int,c:int):
             st.session_state.board = nb
             st.session_state.sel_to = (r,c); st.session_state.highlight_to=(r,c)
             st.session_state.legal=set(legal_shots_from(nb,r,c))
-            st.session_state.phase="shoot"; st.rerun()
+            st.session_state.phase="shoot"; _rerun()
         return
     if phase=="shoot":
         if (r,c) in st.session_state.legal:
-            # 사람 턴 시간 누적 (사격으로 턴 종료 직전)
-            _accumulate_time(HUM)
+            _accumulate_time(HUM)  # 사람 턴 종료 직전 누적
             st.session_state.board[r][c] = BLOCK
             st.session_state.last_shot_pos=(r,c)
             st.session_state.last_human_move = Move(st.session_state.sel_from, st.session_state.sel_to, (r,c))
             st.session_state.hist.append(clone(board))
-            _switch_turn(CPU)  # 전환 및 turn_start 재설정
-            st.rerun()
+            _switch_turn(CPU)
+            _rerun()
         return
 
-# 안내
 st.subheader("보드")
 st.caption(f"{EMO_HUM}=플레이어(선턴)  {EMO_CPU}=컴퓨터(후턴)  {EMO_BLK}=블록  ({EMO_MOVE} 이동, {EMO_SHOT} 사격 · ◉ 선택 · ✓ 방금 이동 · ✳ 최근 블록)")
 
-# 보드 렌더(항상 클릭 허용 → 유효성은 on_click에서 필터)
 st.markdown('<div class="board-wrap"><div class="board-grid">', unsafe_allow_html=True)
 for r in range(SIZE):
     st.markdown('<div class="board-row">', unsafe_allow_html=True)
@@ -369,9 +358,9 @@ def end_game(winner_label: str, human_win: bool):
 
 def announce_and_set(who: str, ok=True):
     color = "#16a34a" if ok else "#dc2626"
-    st.markdown(f"<div style='padding:8px;border-radius:8px;background:{'#ecfdf5' if ok else '#fef2f2'};color:{color}'><b>{who} 승리!</b></div>", unsafe_allow_html=True)
+    bg = "#ecfdf5" if ok else "#fef2f2"
+    st.markdown(f"<div style='padding:8px;border-radius:8px;background:{bg};color:{color}'><b>{who} 승리!</b></div>", unsafe_allow_html=True)
 
-# 시간초과 먼저 체크
 _check_flagfall()
 
 if not st.session_state.game_over:
@@ -383,10 +372,9 @@ if not st.session_state.game_over and st.session_state.turn==CPU:
         announce_and_set("플레이어", ok=True); end_game("플레이어", human_win=True)
     else:
         with st.spinner("컴퓨터 생각중..."):
-            start_ai = time.time()
+            ai_t0 = time.time()
             mv = ai_move(board, st.session_state.difficulty)
-            # AI 생각 시간 누적
-            st.session_state.cpu_time += max(0.0, time.time() - start_ai)
+            st.session_state.cpu_time += max(0.0, time.time() - ai_t0)
             if mv is None:
                 announce_and_set("플레이어", ok=True); end_game("플레이어", human_win=True)
             else:
@@ -394,4 +382,4 @@ if not st.session_state.game_over and st.session_state.turn==CPU:
                 st.session_state.last_cpu_move = mv
                 st.session_state.last_shot_pos = mv.shot
                 _switch_turn(HUM)
-        st.rerun()
+        _rerun()
