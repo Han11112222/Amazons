@@ -153,7 +153,7 @@ def reset_game():
     st.session_state.sel_to = None
     st.session_state.legal = set()
     st.session_state.difficulty = st.session_state.get("difficulty", 6)
-    st.session_state.cell_px = 52  # 고정 크기 (슬라이더 제거)
+    st.session_state.cell_px = 52
     st.session_state.last_human_move = None
     st.session_state.last_cpu_move = None
     st.session_state.last_shot_pos = None
@@ -184,25 +184,37 @@ with r:
 
 # ----------------- 정사각형 보드 CSS -----------------
 CELL = int(st.session_state.cell_px)
-GAP  = 8  # 행/열 동일 간격(px)
-board_total_px = SIZE * CELL + (SIZE-1) * GAP
+GAP  = 8
+board_total_px = SIZE * CELL + (SIZE-1) * GAP  # 가로·세로 동일
 
 st.markdown(
     f"""
     <style>
-      section.main > div:has(> div:nth-child(3)) {{ padding-top: 0 !important; }}
+      /* 문제를 만들던 :has() 규칙 제거 — 레이어 겹침 방지 */
+
+      /* 보드 외곽 컨테이너: 진짜 정사각형 + 클릭 우선권(z-index) */
       .board-wrap {{
         width: {board_total_px}px;
+        height: {board_total_px}px;
         margin: 6px auto 12px auto;
         padding: {GAP/2}px;
         border: 2px solid #94a3b8;
         border-radius: 12px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        position: relative;
+        z-index: 2;              /* 상단 UI가 덮지 못하도록 */
+        background: white;
       }}
+
+      /* Streamlit columns 간격을 고정 GAP로 */
       .board-row .stColumns {{ gap: {GAP}px !important; }}
       .board-row div[data-testid="column"] {{ padding: 0 !important; }}
+
+      /* 행 간격도 GAP으로 → 세로 길이 = 가로 길이 */
       .board-row {{ margin-bottom: {GAP}px; }}
       .board-row:last-child {{ margin-bottom: 0; }}
+
+      /* 칸 버튼: 완전 정사각형 + 클릭 우선권 */
       .board-grid .stButton > button {{
         width: {CELL}px !important;
         height: {CELL}px !important;
@@ -215,6 +227,8 @@ st.markdown(
         background: white !important;
         font-size: {int(CELL*0.45)}px !important;
         display: inline-flex; align-items: center; justify-content: center;
+        position: relative;      /* 클릭 우선: 버튼 자체 위로 */
+        z-index: 3;
       }}
       .board-grid .stButton > button:disabled {{ opacity: 1.0 !important; }}
     </style>
@@ -240,7 +254,6 @@ def cell_label(r:int,c:int)->str:
     return label
 
 def on_click(r:int,c:int):
-    # 유효하지 않은 상황은 모두 무시 (항상 클릭 가능하므로 여기서 필터)
     if st.session_state.game_over or st.session_state.turn!=HUM:
         return
     phase = st.session_state.phase
@@ -272,7 +285,6 @@ def on_click(r:int,c:int):
         return
 
 # 라벨
-who = st.session_state.winner
 st.subheader("보드")
 st.caption(f"{EMO_HUM}=플레이어(선턴)  {EMO_CPU}=컴퓨터(후턴)  {EMO_BLK}=블록  ({EMO_MOVE} 이동, {EMO_SHOT} 사격 · ◉ 선택 · ✓ 방금 이동 · ✳ 최근 블록)")
 
@@ -280,10 +292,9 @@ st.caption(f"{EMO_HUM}=플레이어(선턴)  {EMO_CPU}=컴퓨터(후턴)  {EMO_B
 st.markdown('<div class="board-wrap"><div class="board-grid">', unsafe_allow_html=True)
 for r in range(SIZE):
     st.markdown('<div class="board-row">', unsafe_allow_html=True)
-    cols = st.columns(SIZE)  # gap은 CSS로 강제 통일
+    cols = st.columns(SIZE)
     for c in range(SIZE):
         label = cell_label(r,c)
-        # 항상 클릭 가능 → 유효성은 on_click에서 판정
         if cols[c].button(label, key=f"cell_{r}_{c}"):
             on_click(r,c)
     st.markdown('</div>', unsafe_allow_html=True)
