@@ -165,18 +165,60 @@ def search(b:Board, depth:int, a:int, bb:int, side:int, P:Dict[str,int])->int:
         return best
 
 def ai_move(b:Board, difficulty:int)->Optional[Move]:
-    if difficulty<=3:
+    """
+    난이도 설계(1~15):
+      1~3  : 깊이1, 넓은 후보
+      4~7  : 깊이2, 중간 후보
+      8~12 : 깊이3, 점진적 확장
+      13~15: 깊이4, 강력하지만 각 층 후보를 타이트하게 제한(실행시간 제어)
+    """
+    if difficulty <= 3:
         depth=1
-        P=dict(k_dest_d1=6+difficulty*3, k_shot_d1=5+difficulty*2, cap_d1=40+difficulty*20)
-    elif difficulty<=6:
+        P=dict(
+            k_dest_d1=6 + difficulty*3,
+            k_shot_d1=5 + difficulty*2,
+            cap_d1=40 + difficulty*20
+        )
+    elif difficulty <= 7:
         depth=2
-        P=dict(k_dest_d2=8+(difficulty-3)*2, k_shot_d2=6+(difficulty-3), cap_d2=40+10*(difficulty-3),
-               k_dest_d1=10, k_shot_d1=8, cap_d1=80)
+        P=dict(
+            k_dest_d2=8 + (difficulty-3)*2,
+            k_shot_d2=6 + (difficulty-3),
+            cap_d2=40 + 10*(difficulty-3),
+            k_dest_d1=10, k_shot_d1=8, cap_d1=80
+        )
+    elif difficulty <= 12:
+        depth=3
+        s = difficulty-7  # 1~5
+        P=dict(
+            k_dest_d3=5 + s,         # 6~10
+            k_shot_d3=4 + s//2,      # 4~6
+            cap_d3=18 + 4*s,         # 22~38
+            k_dest_d2=9 + s,         # 10~14
+            k_shot_d2=7 + s//2,      # 7~9
+            cap_d2=42 + 8*s,         # 50~82
+            k_dest_d1=10, k_shot_d1=8, cap_d1=80
+        )
     else:
-        depth=3; s=difficulty-6
-        P=dict(k_dest_d3=5+s, k_shot_d3=4+s//2, cap_d3=18+4*s,
-               k_dest_d2=9+s, k_shot_d2=7+s//2, cap_d2=42+8*s,
-               k_dest_d1=10, k_shot_d1=8, cap_d1=80)
+        # 13~15: 깊이4. 각 층 후보 수와 cap을 타이트하게 묶어 시간 제어
+        depth=4
+        s = difficulty-12  # 1~3
+        P=dict(
+            # d4: 가장 제한적으로 탐색
+            k_dest_d4=3 + s,         # 4~6
+            k_shot_d4=3 + (s//2),    # 3~4
+            cap_d4=10 + 2*s,         # 12~16
+            # d3
+            k_dest_d3=6 + s,         # 7~9
+            k_shot_d3=5 + (s//2),    # 5~6
+            cap_d3=20 + 4*s,         # 24~32
+            # d2
+            k_dest_d2=10 + s,        # 11~13
+            k_shot_d2=7 + (s//2),    # 7~8
+            cap_d2=50 + 6*s,         # 56~68
+            # d1
+            k_dest_d1=10, k_shot_d1=8, cap_d1=80
+        )
 
     root = gen_moves_limited(b, CPU, P[f"k_dest_d{depth}"], P[f"k_shot_d{depth}"], P[f"cap_d{depth}"])
     if not root: return None
@@ -233,7 +275,7 @@ with left:
     st.title("Cool Choi Amazons")
     st.caption("말을 퀸처럼 이동 → 도착칸에서 또 퀸처럼 화살(블록)을 발사해 빈칸을 막기. 상대가 더 이상 이동 못 하면 승리.")
 with right:
-    diff = st.slider("난이도 (1 쉬움 ··· 10 어려움)", 1, 10, st.session_state.get("difficulty",5))
+    diff = st.slider("난이도 (1 쉬움 ··· 15 매우 어려움)", 1, 15, st.session_state.get("difficulty",5))
     st.session_state.difficulty = diff
     c1,c2 = st.columns(2)
     if c1.button("새 게임", use_container_width=True):
